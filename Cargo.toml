@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "roogle",
+    "roogle-server",
     "roogle-engine",
     "roogle-util",
 ]

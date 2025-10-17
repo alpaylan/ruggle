@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Roogle</title>
+  <style>
+    :root { --bg: #0b0e14; --bg2: #11151c; --fg: #e6e1cf; --muted: #9da9b1; --accent: #82aaff; --accent2: #c3e88d; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    header { padding: 16px 20px; background: var(--bg2); border-bottom: 1px solid #1f2430; position: sticky; top: 0; z-index: 10; }
+    header h1 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+    main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    .controls { display: grid; grid-template-columns: 1fr 160px 140px 140px 120px; gap: 10px; align-items: center; }
+    .controls label { font-size: 12px; color: var(--muted); }
+    .controls input[type="text"], .controls select, .controls input[type="number"] { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a2f3a; background: #0f131a; color: var(--fg); }
+    .controls button { padding: 10px 14px; border-radius: 8px; border: 1px solid #2a2f3a; background: var(--accent); color: #0b0e14; font-weight: 700; cursor: pointer; }
+    .controls button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .hint { margin: 8px 0 16px; color: var(--muted); font-size: 12px; }
+    .results { margin-top: 16px; display: grid; gap: 12px; }
+    .card { padding: 12px 14px; border: 1px solid #222836; background: #0f131a; border-radius: 10px; }
+    .card .name { font-weight: 700; color: var(--accent2); }
+    .card .path { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .card a { color: var(--accent); text-decoration: none; }
+    .row { display: contents; }
+    .sr-only { position: absolute; left: -10000px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Roogle</h1>
+  </header>
+  <main>
+    <div class="controls">
+      <div>
+        <label for="query">Query</label>
+        <input id="query" type="text" placeholder="e.g. fn (Option<Result<T, E>>) -> Result<Option<T>, E>" />
+      </div>
+      <div>
+        <label for="scope">Scope</label>
+        <select id="scope"></select>
+      </div>
+      <div>
+        <label for="limit">Limit</label>
+        <input id="limit" type="number" min="1" max="200" value="30" />
+      </div>
+      <div>
+        <label for="threshold">Threshold</label>
+        <input id="threshold" type="number" step="0.05" min="0" max="1" value="0.4" />
+      </div>
+      <div>
+        <label class="sr-only" for="run">Search</label>
+        <button id="run">Search</button>
+      </div>
+    </div>
+    <div class="hint">Scopes are provided by <code>/scopes</code>. Results come from <code>/search</code>.</div>
+    <div id="results" class="results"></div>
+  </main>
+  <script>
+    const scopeEl = document.getElementById('scope');
+    const queryEl = document.getElementById('query');
+    const limitEl = document.getElementById('limit');
+    const thresholdEl = document.getElementById('threshold');
+    const runBtn = document.getElementById('run');
+    const resultsEl = document.getElementById('results');
+    let currentController = null;
+
+    function debounce(fn, wait) {
+      let t;
+      return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), wait);
+      };
+    }
+
+    async function loadScopes() {
+      scopeEl.innerHTML = '';
+      try {
+        const res = await fetch('/scopes');
+        const scopes = await res.json();
+        scopes.sort();
+        for (const s of scopes) {
+          const opt = document.createElement('option');
+          opt.value = s;
+          opt.textContent = s;
+          scopeEl.appendChild(opt);
+        }
+        // Select a sane default if present
+        const libstd = Array.from(scopeEl.options).find(o => o.value === 'set:libstd');
+        if (libstd) scopeEl.value = 'set:libstd';
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderResults(hits) {
+      resultsEl.innerHTML = '';
+      if (!hits || hits.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'card';
+        empty.textContent = 'No results';
+        resultsEl.appendChild(empty);
+        return;
+      }
+      for (const h of hits) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = h.name;
+        const path = document.createElement('div');
+        path.className = 'path';
+        path.textContent = (h.path || []).join('::');
+        const link = document.createElement('div');
+        const a = document.createElement('a');
+        a.href = 'https://doc.rust-lang.org/' + (h.link || []).join('/');
+        a.target = '_blank';
+        a.rel = 'noreferrer noopener';
+        a.textContent = 'Open docs';
+        link.appendChild(a);
+        card.appendChild(name);
+        card.appendChild(path);
+        card.appendChild(link);
+        resultsEl.appendChild(card);
+      }
+    }
+
+    async function runSearch() {
+      const query = queryEl.value.trim();
+      const scope = scopeEl.value;
+      const limit = parseInt(limitEl.value, 10) || 30;
+      const threshold = parseFloat(thresholdEl.value);
+      if (!scope) return;
+      if (query.length < 2) { // avoid excessive queries
+        resultsEl.innerHTML = '';
+        return;
+      }
+      runBtn.disabled = true;
+      try {
+        // cancel previous in-flight request
+        if (currentController) currentController.abort();
+        currentController = new AbortController();
+        const params = new URLSearchParams();
+        params.set('scope', scope);
+        params.set('query', query);
+        params.set('limit', String(limit));
+        params.set('threshold', String(isFinite(threshold) ? threshold : 0.4));
+        // show a lightweight loading hint
+        resultsEl.innerHTML = '<div class="card">Searching…</div>';
+        const res = await fetch('/search?' + params.toString(), { signal: currentController.signal });
+        const hits = await res.json();
+        renderResults(hits);
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          console.error(e);
+        }
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    const debouncedSearch = debounce(runSearch, 300);
+    runBtn.addEventListener('click', runSearch);
+    queryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+    queryEl.addEventListener('input', debouncedSearch);
+    scopeEl.addEventListener('change', () => {
+      if (queryEl.value.trim().length >= 2) runSearch();
+    });
+
+    loadScopes();
+  </script>
+</body>
+</html>

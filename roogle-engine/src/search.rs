@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use rustdoc_types as types;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -10,13 +10,14 @@ use crate::{
     Index,
 };
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hit {
     pub name: String,
     pub path: Vec<String>,
     pub link: Vec<String>,
     pub docs: Option<String>,
-    #[serde(skip)]
+    pub signature: String,
+    #[serde(skip_serializing, skip_deserializing)]
     similarities: Similarities,
 }
 
@@ -81,7 +82,7 @@ impl Index {
                 .ok_or_else(|| SearchError::CrateNotFound(krate_name.clone()))?;
             for item in krate.index.values() {
                 match item.inner {
-                    types::ItemEnum::Function(_) => {
+                    types::ItemEnum::Function(ref f) => {
                         let (path, link) = Self::path_and_link(krate, &krate_name, item, None)?;
                         let sims = self.compare(query, item, krate, None);
 
@@ -91,6 +92,10 @@ impl Index {
                                 path,
                                 link,
                                 docs: item.docs.clone(),
+                                signature: format_fn_signature(
+                                    item.name.as_deref().unwrap_or(""),
+                                    &f.decl,
+                                ),
                                 similarities: sims,
                             });
                         }
@@ -106,7 +111,7 @@ impl Index {
                             })
                             .collect::<Result<Vec<_>>>()?;
                         for assoc_item in assoc_items {
-                            if let types::ItemEnum::Method(_) = assoc_item.inner {
+                            if let types::ItemEnum::Method(ref m) = assoc_item.inner {
                                 let (path, link) = Self::path_and_link(
                                     krate,
                                     &krate_name,
@@ -121,6 +126,10 @@ impl Index {
                                         path,
                                         link,
                                         docs: assoc_item.docs.clone(),
+                                        signature: format_fn_signature(
+                                            assoc_item.name.as_deref().unwrap_or(""),
+                                            &m.decl,
+                                        ),
                                         similarities: sims,
                                     })
                                 }
@@ -278,6 +287,71 @@ impl Index {
             // SAFETY: Already asserted at the beginning of this function.
             _ => unreachable!(),
         }
+    }
+}
+
+fn format_fn_signature(name: &str, decl: &types::FnDecl) -> String {
+    let args = decl
+        .inputs
+        .iter()
+        .map(|(n, t)| {
+            if n.is_empty() {
+                render_type(t)
+            } else {
+                format!("{}: {}", n, render_type(t))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ret = match &decl.output {
+        None => "".to_string(),
+        Some(t) => format!(" -> {}", render_type(t)),
+    };
+    format!("fn {}({}){}", name, args, ret)
+}
+
+fn render_type(t: &types::Type) -> String {
+    use types::Type::*;
+    match t {
+        Primitive(p) => p.clone(),
+        Generic(g) => g.clone(),
+        Tuple(ts) => {
+            let inner = ts.iter().map(render_type).collect::<Vec<_>>().join(", ");
+            format!("({})", inner)
+        }
+        Slice(inner) => format!("[{}]", render_type(inner)),
+        Array { type_, .. } => format!("[{}]", render_type(type_)),
+        RawPointer { mutable, type_ } => {
+            let m = if *mutable { "mut" } else { "const" };
+            format!("*{} {}", m, render_type(type_))
+        }
+        BorrowedRef { mutable, type_, .. } => {
+            let m = if *mutable { "mut " } else { "" };
+            format!("&{}{}", m, render_type(type_))
+        }
+        ResolvedPath { name, args, .. } => {
+            let mut s = name.clone();
+            if let Some(ga) = args {
+                if let types::GenericArgs::AngleBracketed { args, .. } = ga.as_ref() {
+                    let inner = args
+                        .iter()
+                        .filter_map(|ga| match ga {
+                            types::GenericArg::Type(t) => Some(render_type(t)),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if !inner.is_empty() {
+                        s.push('<');
+                        s.push_str(&inner);
+                        s.push('>');
+                    }
+                }
+            }
+            s
+        }
+        QualifiedPath { name, .. } => name.clone(),
+        _ => "_".to_string(),
     }
 }
 

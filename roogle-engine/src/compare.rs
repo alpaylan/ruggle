@@ -48,6 +48,12 @@ impl PartialOrd for Similarities {
     }
 }
 
+impl Default for Similarities {
+    fn default() -> Self {
+        Similarities(Vec::new())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DiscreteSimilarity {
     /// Indicates that two types are the same.

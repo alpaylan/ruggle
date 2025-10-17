@@ -1,0 +1,131 @@
+{
+    "name": "roogle",
+    "displayName": "Roogle",
+    "description": "Search Rust APIs with Roogle",
+    "version": "0.0.1",
+    "publisher": "AlperenKeles",
+    "license": "MIT",
+    "engines": {
+        "vscode": "^1.84.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/alpaylan/roogle"
+    },
+    "activationEvents": [
+        "onCommand:roogle.search",
+        "onCommand:roogle.searchSelection",
+        "onCommand:roogle.setHost",
+        "onCommand:roogle.showLogs",
+        "onCommand:roogle.setScope",
+        "onCommand:roogle.startServer",
+        "onCommand:roogle.stopServer"
+    ],
+    "main": "out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "roogle.search",
+                "title": "Roogle: Search APIs"
+            },
+            {
+                "command": "roogle.searchSelection",
+                "title": "Roogle: Search Selection"
+            },
+            {
+                "command": "roogle.setHost",
+                "title": "Roogle: Set Server Host"
+            },
+            {
+                "command": "roogle.showLogs",
+                "title": "Roogle: Show Logs"
+            },
+            {
+                "command": "roogle.setScope",
+                "title": "Roogle: Set Scope"
+            },
+            {
+                "command": "roogle.startServer",
+                "title": "Roogle: Start Server"
+            },
+            {
+                "command": "roogle.stopServer",
+                "title": "Roogle: Stop Server"
+            }
+        ],
+        "configuration": {
+            "type": "object",
+            "title": "Roogle",
+            "properties": {
+                "roogle.host": {
+                    "type": "string",
+                    "default": "http://localhost:8000",
+                    "description": "Roogle server base URL"
+                },
+                "roogle.scope": {
+                    "type": "string",
+                    "default": "set:libstd",
+                    "description": "Default search scope"
+                },
+                "roogle.limit": {
+                    "type": "number",
+                    "default": 30,
+                    "description": "Max results"
+                },
+                "roogle.threshold": {
+                    "type": "number",
+                    "default": 0.4,
+                    "description": "Threshold"
+                },
+                "roogle.autoStart": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Automatically start local Roogle server if not reachable"
+                },
+                "roogle.serverMode": {
+                    "type": "string",
+                    "enum": [
+                        "cargo",
+                        "binary",
+                        "docker"
+                    ],
+                    "default": "cargo",
+                    "description": "How to start the local server when autoStart is enabled"
+                },
+                "roogle.serverCommand": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to Roogle server binary (used when serverMode=binary)"
+                },
+                "roogle.indexDir": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to roogle-index directory to pass as --index"
+                },
+                "roogle.port": {
+                    "type": "number",
+                    "default": 8000,
+                    "description": "Port to expose when serverMode=docker"
+                },
+                "roogle.repoRoot": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Working directory for cargo mode (path to Roogle repo root)"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "package": "vsce package --allow-missing-repository"
+    },
+    "devDependencies": {
+        "@types/node": "^18",
+        "@types/vscode": "^1.84.0",
+        "typescript": "^5.6.3",
+        "@vscode/vsce": "^2.32.0"
+    },
+    "dependencies": {}
+}

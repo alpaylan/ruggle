@@ -1,0 +1,23 @@
+# Exclude dev and source files from the VSIX
+.vscode/**
+.vscode-test/**
+.git/**
+.gitattributes
+.gitignore
+npm-debug.log
+**/.DS_Store
+
+# TypeScript sources and configs (we ship compiled JS in out/)
+src/**
+**/*.ts
+**/*.map
+tsconfig.json
+
+# Node dev deps (none needed at runtime)
+node_modules/**
+
+# Tests and misc
+out/test/**
+coverage/**
+README.md
+CHANGELOG.md

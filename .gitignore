@@ -1,2 +1,13 @@
 /target
 Cargo.lock
+.vscode/
+**/node_modules/
+**/out/
+**/dist/
+**/build/
+**/target/
+**/rust/
+**/indexer/
+**/indexer-libstd/
+**/indexer-rustc/
+**/indexer-crates/
