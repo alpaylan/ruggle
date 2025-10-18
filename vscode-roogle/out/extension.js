@@ -144,8 +144,12 @@ function activate(context) {
         vscode.window.showInformationMessage(ok ? 'Roogle server is running' : 'Failed to start Roogle server');
     });
     const stopServerCmd = vscode.commands.registerCommand('roogle.stopServer', async () => {
-        stopServer();
-        vscode.window.showInformationMessage('Roogle server stopped');
+        if (stopServer()) {
+            vscode.window.showInformationMessage('Roogle server stopped');
+        }
+        else {
+            vscode.window.showInformationMessage('No Roogle server process to stop');
+        }
     });
     const showLogsCmd = vscode.commands.registerCommand('roogle.showLogs', async () => {
         outChan?.show(true);
@@ -289,6 +293,11 @@ function stopServer() {
         catch { /* noop */ }
         serverProc = undefined;
         outChan?.appendLine('[Roogle] Server stopped');
+        return true;
+    }
+    else {
+        outChan?.appendLine('[Roogle] No server process to stop');
+        return false;
     }
 }
 async function ensureServer(cfg) {
