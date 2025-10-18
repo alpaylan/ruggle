@@ -11,3 +11,5 @@ Cargo.lock
 **/indexer-libstd/
 **/indexer-rustc/
 **/indexer-crates/
+**/out/
+**.vsix
