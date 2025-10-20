@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+
+use rustdoc_types::Qualifiers;
 use serde::{Deserialize, Serialize};
 
 pub mod parse;
@@ -37,7 +40,7 @@ pub enum QueryKind {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Function {
     pub decl: FnDecl,
-    // pub generics: Generics,
+    pub qualifiers: HashSet<Qualifiers>,
 }
 
 #[non_exhaustive]

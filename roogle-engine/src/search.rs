@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use rustdoc_types as types;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::debug;
 
 use crate::{
     compare::{Compare, Similarities},
@@ -72,6 +73,12 @@ impl Index {
     ///
     /// Returns [`Hit`]s whose similarity score outperforms given `threshold`.
     pub fn search(&self, query: &Query, scope: Scope, threshold: f32) -> Result<Vec<Hit>> {
+        tracing::debug!(
+            "searching with query: {:?}, scope: {:?}, threshold: {}",
+            query,
+            scope,
+            threshold
+        );
         let mut hits = vec![];
 
         let krates = scope.flatten();
@@ -87,6 +94,8 @@ impl Index {
                         let sims = self.compare(query, item, krate, None);
 
                         if sims.score() < threshold {
+                            tracing::debug!("found hit: {:?}", item.name);
+                            debug!(?item, ?path, ?link, ?sims, score = ?sims.score());
                             hits.push(Hit {
                                 name: item.name.clone().unwrap(), // SAFETY: all functions has its name.
                                 path,
@@ -143,6 +152,8 @@ impl Index {
         }
 
         hits.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+
+        debug!("found {} hits", hits.len());
         Ok(hits)
     }
 
@@ -433,6 +444,7 @@ mod tests {
                 inputs: Some(vec![]),
                 output: Some(FnRetTy::DefaultReturn),
             },
+            qualifiers: HashSet::new(),
         };
 
         let i = foo();

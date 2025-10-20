@@ -35,13 +35,36 @@ fn parse_function_query<'a, E>(i: &'a str) -> IResult<&'a str, Query, E>
 where
     E: ParseError<&'a str> + ContextError<&'a str>,
 {
-    let (i, f) = opt(tag("fn"))(i)?;
-    let (i, _) = match f {
-        Some(_) => multispace0(i)?,
-        None => multispace0(i)?,
-    };
+    let (i, qualifiers) = opt(preceded(
+        multispace0,
+        many0(preceded(
+            multispace0,
+            alt((
+                tag("pub"),
+                tag("async"),
+                tag("unsafe"),
+                tag("extern"),
+                tag("const"),
+                tag("fn"),
+            )),
+        )),
+    ))(i)?;
+
+    let qualifiers = qualifiers
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|q| match q {
+            "async" => Some(Qualifiers::Async),
+            "const" => Some(Qualifiers::Const),
+            "unsafe" => Some(Qualifiers::Unsafe),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+
     let (i, name) = opt(preceded(multispace1, parse_symbol))(i)?;
-    let (i, decl) = opt(parse_function)(i)?;
+    let (i, mut decl) = opt(preceded(multispace0, parse_function))(i)?;
+
+    decl.as_mut().map(|d| d.qualifiers = qualifiers);
 
     let query = Query {
         name,
@@ -56,7 +79,10 @@ where
 {
     let (i, decl) = parse_function_decl(i)?;
 
-    let function = Function { decl };
+    let function = Function {
+        decl,
+        qualifiers: HashSet::new(),
+    };
     Ok((i, function))
 }
 
@@ -298,4 +324,40 @@ where
         value(Bool, tag("bool")),
         value(Str, tag("str")),
     ))(i)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_qualified_function() {
+        let input = "pub async fn foo(bar: i32, _: &str) -> bool";
+        let (_, query) = parse_query(input).unwrap();
+        assert_eq!(
+            query,
+            Query {
+                name: Some("foo".to_string()),
+                kind: Some(QueryKind::FunctionQuery(Function {
+                    decl: FnDecl {
+                        inputs: Some(vec![
+                            Argument {
+                                name: Some("bar".to_string()),
+                                ty: Some(Type::Primitive(PrimitiveType::I32)),
+                            },
+                            Argument {
+                                name: None,
+                                ty: Some(Type::BorrowedRef {
+                                    mutable: false,
+                                    type_: Box::new(Type::Primitive(PrimitiveType::Str)),
+                                }),
+                            },
+                        ]),
+                        output: Some(FnRetTy::Return(Type::Primitive(PrimitiveType::Bool))),
+                    },
+                    qualifiers: HashSet::from_iter(vec![Qualifiers::Async, Qualifiers::Const]),
+                })),
+            }
+        );
+    }
 }

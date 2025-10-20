@@ -30,6 +30,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let cli = Cli::from_args();
     let query = match cli.query {
         Some(q) => q,
@@ -42,6 +43,7 @@ async fn main() -> Result<()> {
     };
 
     let client = reqwest::Client::new();
+    tracing::debug!("(scope={}, query={})", cli.scope, query);
     let url = format!(
         "{}/search?scope={}&query={}&limit={}&threshold={}",
         cli.host,
@@ -50,6 +52,7 @@ async fn main() -> Result<()> {
         cli.limit,
         cli.threshold
     );
+    tracing::debug!("requesting {}", url);
 
     let res = client.get(&url).send().await.context("request failed")?;
 

@@ -1,10 +1,10 @@
 use std::{
     cmp::{max, min},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
 };
 
 use levenshtein::levenshtein;
-use rustdoc_types as types;
+use rustdoc_types::{self as types, Qualifiers};
 use tracing::{instrument, trace};
 
 use crate::query::*;
@@ -154,6 +154,26 @@ impl Compare<types::ItemEnum> for QueryKind {
     }
 }
 
+impl Compare<Qualifiers> for Qualifiers {
+    #[instrument]
+    fn compare(
+        &self,
+        qualifer: &Qualifiers,
+        _: &types::Crate,
+        _: &mut types::Generics,
+        _: &mut HashMap<String, Type>,
+    ) -> Vec<Similarity> {
+        let mut sims = vec![];
+
+        if self == qualifer {
+            sims.push(Discrete(Equivalent));
+        } else {
+            sims.push(Discrete(Different));
+        }
+
+        sims
+    }
+}
 impl Compare<types::Function> for Function {
     #[instrument(skip(krate))]
     fn compare(
@@ -169,7 +189,29 @@ impl Compare<types::Function> for Function {
         generics
             .where_predicates
             .append(&mut function.generics.where_predicates.clone());
-        self.decl.compare(&function.decl, krate, generics, substs)
+
+        let mut sims = Vec::new();
+
+        let missing_qualifiers = self
+            .qualifiers
+            .difference(&function.header)
+            .cloned()
+            .collect::<HashSet<_>>();
+        let extra_qualifiers = function
+            .header
+            .difference(&self.qualifiers)
+            .cloned()
+            .collect::<HashSet<_>>();
+
+        for _ in missing_qualifiers {
+            sims.push(Discrete(Different));
+        }
+        for _ in extra_qualifiers {
+            sims.push(Discrete(Different));
+        }
+
+        sims.extend(self.decl.compare(&function.decl, krate, generics, substs));
+        sims
     }
 }
 
@@ -209,9 +251,7 @@ impl Compare<types::FnDecl> for FnDecl {
             });
 
             if inputs.len() != decl.inputs.len() {
-                // FIXME: Replace this line below with `usize::abs_diff` once it got stablized.
-                let abs_diff =
-                    max(inputs.len(), decl.inputs.len()) - min(inputs.len(), decl.inputs.len());
+                let abs_diff = usize::abs_diff(inputs.len(), decl.inputs.len());
                 sims.append(&mut vec![Discrete(Different); abs_diff])
             } else if inputs.is_empty() && decl.inputs.is_empty() {
                 sims.push(Discrete(Equivalent));
