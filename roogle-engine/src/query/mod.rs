@@ -1,12 +1,13 @@
 use std::collections::HashSet;
 
-use rustdoc_types::Qualifiers;
 use serde::{Deserialize, Serialize};
+
+use crate::types::Qualifiers;
 
 pub mod parse;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Item {
+pub struct HitItem {
     pub path: Vec<String>,
     pub link: Vec<String>,
     pub docs: Option<String>,

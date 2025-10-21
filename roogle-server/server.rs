@@ -9,7 +9,8 @@ use axum::{
     routing::{get, get_service},
     Json, Router,
 };
-use rustdoc_types::Crate;
+
+use roogle_server::make_index;
 use serde::Deserialize;
 use structopt::StructOpt;
 use tower_http::{
@@ -24,7 +25,6 @@ use roogle_engine::{
     search::{Hit, Scope},
     Index,
 };
-use roogle_util::shake;
 
 const STATIC_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
 
@@ -210,37 +210,6 @@ fn init_logger() {
         .pretty()
         .with_target(true)
         .init();
-}
-
-fn make_index(index_dir: &PathBuf) -> Result<Index> {
-    let crates = std::fs::read_dir(format!("{}/crate", index_dir.display()))
-        .context("failed to read index files")?
-        .map(|entry| {
-            let entry = entry?;
-            let json = std::fs::read_to_string(entry.path())
-                .with_context(|| format!("failed to read `{:?}`", entry.file_name()))?;
-            let mut deserializer = serde_json::Deserializer::from_str(&json);
-            deserializer.disable_recursion_limit();
-            let krate = Crate::deserialize(&mut deserializer)
-                .with_context(|| format!("failed to deserialize `{:?}`", entry.file_name()))?;
-            let file_name = entry
-                .path()
-                .with_extension("")
-                .file_name()
-                .with_context(|| format!("failed to get file name from `{:?}`", entry.path()))?
-                .to_str()
-                .context("failed to get `&str` from `&OsStr`")?
-                .to_owned();
-            Ok((file_name, shake(krate)))
-        })
-        .filter_map(|res: Result<_, anyhow::Error>| {
-            if let Err(ref e) = res {
-                warn!("parsing a JSON file skipped: {}", e);
-            }
-            res.ok()
-        })
-        .collect::<HashMap<_, _>>();
-    Ok(Index { crates })
 }
 
 struct Scopes {

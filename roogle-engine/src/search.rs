@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rustdoc_types as types;
+use crate::types;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::debug;

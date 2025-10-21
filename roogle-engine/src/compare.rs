@@ -4,10 +4,14 @@ use std::{
 };
 
 use levenshtein::levenshtein;
-use rustdoc_types::{self as types, Qualifiers};
+
 use tracing::{instrument, trace};
 
-use crate::query::*;
+use crate::{
+    query::*,
+    types::{self, Generics, Item, Qualifiers},
+    Crate,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum Similarity {
@@ -83,19 +87,19 @@ pub trait Compare<Rhs> {
     fn compare(
         &self,
         rhs: &Rhs,
-        krate: &types::Crate,
-        generics: &mut types::Generics,
+        krate: &Crate,
+        generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity>;
 }
 
-impl Compare<types::Item> for Query {
+impl Compare<Item> for Query {
     #[instrument(skip(krate))]
     fn compare(
         &self,
-        item: &types::Item,
-        krate: &types::Crate,
-        generics: &mut types::Generics,
+        item: &Item,
+        krate: &Crate,
+        generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         let mut sims = vec![];
@@ -121,8 +125,8 @@ impl Compare<String> for Symbol {
     fn compare(
         &self,
         symbol: &String,
-        _: &types::Crate,
-        _: &mut types::Generics,
+        _: &Crate,
+        _: &mut Generics,
         _: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         use std::cmp::max;
@@ -139,8 +143,8 @@ impl Compare<types::ItemEnum> for QueryKind {
     fn compare(
         &self,
         kind: &types::ItemEnum,
-        krate: &types::Crate,
-        generics: &mut types::Generics,
+        krate: &Crate,
+        generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         use types::ItemEnum::*;
@@ -159,8 +163,8 @@ impl Compare<Qualifiers> for Qualifiers {
     fn compare(
         &self,
         qualifer: &Qualifiers,
-        _: &types::Crate,
-        _: &mut types::Generics,
+        _: &Crate,
+        _: &mut Generics,
         _: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         let mut sims = vec![];
@@ -179,8 +183,8 @@ impl Compare<types::Function> for Function {
     fn compare(
         &self,
         function: &types::Function,
-        krate: &types::Crate,
-        generics: &mut types::Generics,
+        krate: &Crate,
+        generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         generics
@@ -220,8 +224,8 @@ impl Compare<types::Method> for Function {
     fn compare(
         &self,
         method: &types::Method,
-        krate: &types::Crate,
-        generics: &mut types::Generics,
+        krate: &Crate,
+        generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         generics.params.append(&mut method.generics.params.clone());
@@ -237,8 +241,8 @@ impl Compare<types::FnDecl> for FnDecl {
     fn compare(
         &self,
         decl: &types::FnDecl,
-        krate: &types::Crate,
-        generics: &mut types::Generics,
+        krate: &Crate,
+        generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         let mut sims = vec![];
@@ -273,8 +277,8 @@ impl Compare<(String, types::Type)> for Argument {
     fn compare(
         &self,
         arg: &(String, types::Type),
-        krate: &types::Crate,
-        generics: &mut types::Generics,
+        krate: &Crate,
+        generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         let mut sims = vec![];
@@ -298,8 +302,8 @@ impl Compare<Option<types::Type>> for FnRetTy {
     fn compare(
         &self,
         ret_ty: &Option<types::Type>,
-        krate: &types::Crate,
-        generics: &mut types::Generics,
+        krate: &Crate,
+        generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         match (self, ret_ty) {
@@ -313,8 +317,8 @@ impl Compare<Option<types::Type>> for FnRetTy {
 fn compare_type(
     lhs: &Type,
     rhs: &types::Type,
-    krate: &types::Crate,
-    generics: &mut types::Generics,
+    krate: &Crate,
+    generics: &mut Generics,
     substs: &mut HashMap<String, Type>,
     allow_recursion: bool,
 ) -> Vec<Similarity> {
@@ -360,7 +364,7 @@ fn compare_type(
                 && allow_recursion =>
         {
             let sims_typedef = compare_type(lhs, rhs, krate, generics, substs, false);
-            if let Some(types::Item {
+            if let Some(Item {
                 inner: types::ItemEnum::Typedef(types::Typedef { type_: ref i, .. }),
                 ..
             }) = krate.index.get(id)
@@ -499,8 +503,8 @@ impl Compare<types::Type> for Type {
     fn compare(
         &self,
         type_: &types::Type,
-        krate: &types::Crate,
-        generics: &mut types::Generics,
+        krate: &Crate,
+        generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         compare_type(self, type_, krate, generics, substs, true)
@@ -512,8 +516,8 @@ impl Compare<String> for PrimitiveType {
     fn compare(
         &self,
         prim_ty: &String,
-        _: &types::Crate,
-        _: &mut types::Generics,
+        _: &Crate,
+        _: &mut Generics,
         _: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         if self.as_str() == prim_ty {
