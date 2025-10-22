@@ -5,11 +5,11 @@ use std::{
 
 use levenshtein::levenshtein;
 
-use tracing::{instrument, trace};
+use tracing::{info, instrument, trace};
 
 use crate::{
     query::*,
-    types::{self, Generics, Item, Qualifiers},
+    types::{self, Generics, Item},
     Crate,
 };
 
@@ -152,17 +152,17 @@ impl Compare<types::ItemEnum> for QueryKind {
 
         match (self, kind) {
             (FunctionQuery(q), Function(i)) => q.compare(i, krate, generics, substs),
-            (FunctionQuery(q), Method(i)) => q.compare(i, krate, generics, substs),
+            // (FunctionQuery(q), Method(i)) => q.compare(i, krate, generics, substs),
             (FunctionQuery(_), _) => vec![Discrete(Different)],
         }
     }
 }
 
-impl Compare<Qualifiers> for Qualifiers {
+impl Compare<Qualifier> for Qualifier {
     #[instrument]
     fn compare(
         &self,
-        qualifer: &Qualifiers,
+        qualifer: &Qualifier,
         _: &Crate,
         _: &mut Generics,
         _: &mut HashMap<String, Type>,
@@ -198,11 +198,12 @@ impl Compare<types::Function> for Function {
 
         let missing_qualifiers = self
             .qualifiers
-            .difference(&function.header)
+            .difference(&function.header.qualifiers())
             .cloned()
             .collect::<HashSet<_>>();
         let extra_qualifiers = function
             .header
+            .qualifiers()
             .difference(&self.qualifiers)
             .cloned()
             .collect::<HashSet<_>>();
@@ -214,33 +215,16 @@ impl Compare<types::Function> for Function {
             sims.push(Discrete(Different));
         }
 
-        sims.extend(self.decl.compare(&function.decl, krate, generics, substs));
+        sims.extend(self.decl.compare(&function.sig, krate, generics, substs));
         sims
     }
 }
 
-impl Compare<types::Method> for Function {
+impl Compare<types::FunctionSignature> for FnDecl {
     #[instrument(skip(krate))]
     fn compare(
         &self,
-        method: &types::Method,
-        krate: &Crate,
-        generics: &mut Generics,
-        substs: &mut HashMap<String, Type>,
-    ) -> Vec<Similarity> {
-        generics.params.append(&mut method.generics.params.clone());
-        generics
-            .where_predicates
-            .append(&mut method.generics.where_predicates.clone());
-        self.decl.compare(&method.decl, krate, generics, substs)
-    }
-}
-
-impl Compare<types::FnDecl> for FnDecl {
-    #[instrument(skip(krate))]
-    fn compare(
-        &self,
-        decl: &types::FnDecl,
+        decl: &types::FunctionSignature,
         krate: &Crate,
         generics: &mut Generics,
         substs: &mut HashMap<String, Type>,
@@ -320,7 +304,7 @@ fn compare_type(
     krate: &Crate,
     generics: &mut Generics,
     substs: &mut HashMap<String, Type>,
-    allow_recursion: bool,
+    _allow_recursion: bool,
 ) -> Vec<Similarity> {
     use {crate::query::Type::*, types::Type};
 
@@ -339,8 +323,17 @@ fn compare_type(
                     }
                 }
             }
-            let i = &i.unwrap(); // SAFETY: `Self` only appears in definitions of associated items.
-            q.compare(i, krate, generics, substs)
+
+            match i {
+                None => {
+                    // FIXME: Previously this code assumed `i` is always found, but it apparently changed.
+                    vec![Discrete(Subequal)]
+                }
+                Some(i) => {
+                    let sims = q.compare(&i, krate, generics, substs);
+                    return sims;
+                }
+            }
         }
         (q, Type::Generic(i)) => match substs.get(i) {
             Some(i) => {
@@ -355,30 +348,31 @@ fn compare_type(
                 vec![Discrete(Subequal)]
             }
         },
-        (q, Type::ResolvedPath { id, .. })
-            if krate
-                .index
-                .get(id)
-                .map(|i| matches!(i.inner, types::ItemEnum::Typedef(_)))
-                .unwrap_or(false)
-                && allow_recursion =>
-        {
-            let sims_typedef = compare_type(lhs, rhs, krate, generics, substs, false);
-            if let Some(Item {
-                inner: types::ItemEnum::Typedef(types::Typedef { type_: ref i, .. }),
-                ..
-            }) = krate.index.get(id)
-            {
-                // TODO: Acknowledge `generics` of `types::Typedef` to get more accurate search results.
-                let sims_adt = q.compare(i, krate, generics, substs);
-                let sum =
-                    |sims: &Vec<Similarity>| -> f32 { sims.iter().map(Similarity::score).sum() };
-                if sum(&sims_adt) < sum(&sims_typedef) {
-                    return sims_adt;
-                }
-            }
-            sims_typedef
-        }
+        // FIXME: Check what happened to typedefs
+        // (q, Type::ResolvedPath { id, .. })
+        //     if krate
+        //         .index
+        //         .get(id)
+        //         .map(|i| matches!(i.inner, types::ItemEnum::Typedef(_)))
+        //         .unwrap_or(false)
+        //         && allow_recursion =>
+        // {
+        //     let sims_typedef = compare_type(lhs, rhs, krate, generics, substs, false);
+        //     // if let Some(Item {
+        //     //     inner: types::ItemEnum::Typedef(types::Typedef { type_: ref i, .. }),
+        //     //     ..
+        //     // }) = krate.index.get(id)
+        //     // {
+        //     //     // TODO: Acknowledge `generics` of `types::Typedef` to get more accurate search results.
+        //     //     let sims_adt = q.compare(i, krate, generics, substs);
+        //     //     let sum =
+        //     //         |sims: &Vec<Similarity>| -> f32 { sims.iter().map(Similarity::score).sum() };
+        //     //     if sum(&sims_adt) < sum(&sims_typedef) {
+        //     //         return sims_adt;
+        //     //     }
+        //     // }
+        //     sims_typedef
+        // }
         (Tuple(q), Type::Tuple(i)) => {
             let mut sims = q
                 .iter()
@@ -401,7 +395,7 @@ fn compare_type(
             let mut sims = vec![Discrete(Equivalent)];
 
             if let Some(q) = q {
-                sims.append(&mut q.compare(i, krate, generics, substs));
+                sims.append(&mut q.compare(i.as_ref(), krate, generics, substs));
             }
 
             sims
@@ -412,7 +406,7 @@ fn compare_type(
                 type_: q,
             },
             Type::RawPointer {
-                mutable: i_mut,
+                is_mutable: i_mut,
                 type_: i,
             },
         )
@@ -422,21 +416,21 @@ fn compare_type(
                 type_: q,
             },
             Type::BorrowedRef {
-                mutable: i_mut,
+                is_mutable: i_mut,
                 type_: i,
                 ..
             },
         ) => {
             if q_mut == i_mut {
-                q.compare(i, krate, generics, substs)
+                q.compare(i.as_ref(), krate, generics, substs)
             } else {
-                let mut sims = q.compare(i, krate, generics, substs);
+                let mut sims = q.compare(i.as_ref(), krate, generics, substs);
                 sims.push(Discrete(Subequal));
                 sims
             }
         }
         (q, Type::RawPointer { type_: i, .. } | Type::BorrowedRef { type_: i, .. }) => {
-            let mut sims = q.compare(i, krate, generics, substs);
+            let mut sims = q.compare(i.as_ref(), krate, generics, substs);
             sims.push(Discrete(Subequal));
             sims
         }
@@ -450,11 +444,11 @@ fn compare_type(
                 name: q,
                 args: q_args,
             },
-            Type::ResolvedPath {
-                name: i,
+            Type::ResolvedPath(types::Path {
+                path: i,
                 args: i_args,
                 ..
-            },
+            }),
         ) => {
             let mut sims = q.compare(i, krate, generics, substs);
 
@@ -508,6 +502,22 @@ impl Compare<types::Type> for Type {
         substs: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         compare_type(self, type_, krate, generics, substs, true)
+    }
+}
+
+impl Compare<types::Term> for Type {
+    #[instrument(skip(krate))]
+    fn compare(
+        &self,
+        type_: &types::Term,
+        krate: &Crate,
+        generics: &mut Generics,
+        substs: &mut HashMap<String, Type>,
+    ) -> Vec<Similarity> {
+        match type_ {
+            types::Term::Type(i) => compare_type(self, i, krate, generics, substs, true),
+            _ => todo!("comparing Type with non-Type Term is not supported yet"),
+        }
     }
 }
 

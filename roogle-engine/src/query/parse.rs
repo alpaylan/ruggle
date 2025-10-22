@@ -54,9 +54,9 @@ where
         .unwrap_or_default()
         .into_iter()
         .filter_map(|q| match q {
-            "async" => Some(Qualifiers::Async),
-            "const" => Some(Qualifiers::Const),
-            "unsafe" => Some(Qualifiers::Unsafe),
+            "async" => Some(Qualifier::Async),
+            "const" => Some(Qualifier::Const),
+            "unsafe" => Some(Qualifier::Unsafe),
             _ => None,
         })
         .collect::<HashSet<_>>();
@@ -355,7 +355,7 @@ mod tests {
                         ]),
                         output: Some(FnRetTy::Return(Type::Primitive(PrimitiveType::Bool))),
                     },
-                    qualifiers: HashSet::from_iter(vec![Qualifiers::Async, Qualifiers::Const]),
+                    qualifiers: HashSet::from_iter(vec![Qualifier::Async, Qualifier::Const]),
                 })),
             }
         );

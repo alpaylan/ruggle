@@ -31,7 +31,6 @@ pub fn make_index(index_dir: &Path) -> Result<Index> {
         // Only include .json or .json.zst files
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             if ext == "json" || ext == "bin" {
-                println!("including {:?}", path.file_name().unwrap());
                 entries.push(path);
             }
         }
@@ -51,12 +50,29 @@ pub fn make_index(index_dir: &Path) -> Result<Index> {
             let ext = path.extension().and_then(|e| e.to_str());
 
             let t0 = std::time::Instant::now();
-            let krate: Crate = match ext {
+            let krate: Result<Crate> = match ext {
                 Some("bin") => {
-                    bincode::decode_from_reader(&mut reader, bincode::config::standard()).ok()?
+                    bincode::decode_from_reader(&mut reader, bincode::config::standard())
+                        .with_context(|| format!("Failed to bincode::decode {}", path.display()))
                 }
-                _ => serde_json::from_reader(&mut reader).ok()?,
+                _ => serde_json::from_reader(&mut reader)
+                    .map_err(|e| {
+                        eprintln!(
+                            "error while serde_json::from_reader({}) => {e:?}",
+                            path.display()
+                        );
+                        e
+                    })
+                    .with_context(|| {
+                        format!("Failed to serde_json::from_reader {}", path.display())
+                    }),
             };
+            if let Err(ref e) = krate {
+                warn!("deserializing {:?} failed: {}", path.display(), e);
+                return None;
+            }
+            let mut krate = krate.unwrap();
+            krate.name = path.file_stem()?.to_str()?.to_owned().into();
             debug!("deserialized {:?} in {:?}", path.display(), t0.elapsed());
 
             Some((path.file_prefix()?.to_str()?.to_owned(), krate))
@@ -134,6 +150,10 @@ pub fn generate_bin_index(index_dir: &PathBuf) -> Result<()> {
         .context("failed to read index files")?
         .map(|entry| {
             let entry = entry?;
+            if entry.path().extension().and_then(|e| e.to_str()) == Some("bin") {
+                // Skip already generated bin files
+                return Ok(());
+            }
             let json = std::fs::read_to_string(entry.path())
                 .with_context(|| format!("failed to read `{:?}`", entry.file_name()))?;
             let mut deserializer = serde_json::Deserializer::from_str(&json);
@@ -158,7 +178,7 @@ pub fn generate_bin_index(index_dir: &PathBuf) -> Result<()> {
         })
         .collect::<Result<Vec<()>>>();
 
-    result.map(|_| ())
+    Ok(())
 }
 
 pub struct Scopes {

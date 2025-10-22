@@ -7,6 +7,7 @@ use roogle_server::{generate_bin_index, make_index, make_scopes, shake_index, Sc
 
 use structopt::StructOpt;
 use tracing::{debug, info};
+use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, StructOpt)]
 struct Cli {
@@ -88,7 +89,7 @@ fn perform_search(
         .with_context(|| format!("search with query `{:?}` failed", query))?;
     let hits = hits
         .into_iter()
-        .inspect(|hit| debug!(?hit.name, ?hit.link, similarities = ?hit.similarities(), score = ?hit.similarities().score()))
+        .inspect(|hit| debug!(?hit.name, link = ?hit.path.link(), similarities = ?hit.similarities(), score = ?hit.similarities().score()))
         .take(limit)
         .collect::<Vec<_>>();
 
@@ -129,7 +130,12 @@ async fn ask_server(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_file(true)
+        .with_line_number(true)
+        .without_time()
+        .init();
     let cli = Cli::from_args();
     let query = match cli.query {
         Some(q) => q,
@@ -180,9 +186,17 @@ async fn main() -> Result<()> {
     }
 
     for (i, h) in hits.iter().enumerate() {
-        let path = h.path.join("::");
-        let link = format!("https://doc.rust-lang.org/{}", h.link.join("/"));
-        println!("{:>2}. {}  ({})\n    {}", i + 1, h.name, path, link);
+        let path = h.path.to_string();
+        let link = format!("https://doc.rust-lang.org/{}", h.path.link());
+        println!(
+            "{:>2}. {} ({})  ({}) ({})\n    {}",
+            i + 1,
+            h.name,
+            h.id.0,
+            path,
+            h.signature,
+            link
+        );
     }
 
     Ok(())

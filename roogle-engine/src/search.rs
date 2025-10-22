@@ -1,6 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path};
 
-use crate::types;
+use crate::{
+    build_parent_index, reconstruct_path_for_local,
+    types::{self, GenericArgs, Item, Path},
+    Parent,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::debug;
@@ -13,9 +17,9 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hit {
+    pub id: types::Id,
     pub name: String,
-    pub path: Vec<String>,
-    pub link: Vec<String>,
+    pub path: crate::Path,
     pub docs: Option<String>,
     pub signature: String,
     #[serde(skip_serializing, skip_deserializing)]
@@ -40,7 +44,7 @@ pub enum SearchError {
     CrateNotFound(String),
 
     #[error("item with id `{0}` is not present in crate `{1}`")]
-    ItemNotFound(String, String),
+    ItemNotFound(u32, String),
 }
 
 pub type Result<T> = std::result::Result<T, SearchError>;
@@ -87,23 +91,24 @@ impl Index {
                 .crates
                 .get(&krate_name)
                 .ok_or_else(|| SearchError::CrateNotFound(krate_name.clone()))?;
+            let parents = build_parent_index(krate);
             for item in krate.index.values() {
                 match item.inner {
                     types::ItemEnum::Function(ref f) => {
-                        let (path, link) = Self::path_and_link(krate, &krate_name, item, None)?;
+                        let path = Self::path_and_link(krate, &krate_name, item, None, &parents)?;
+                        Self::path_and_link(krate, &krate_name, item, None, &parents)?;
                         let sims = self.compare(query, item, krate, None);
 
                         if sims.score() < threshold {
-                            tracing::debug!("found hit: {:?}", item.name);
-                            debug!(?item, ?path, ?link, ?sims, score = ?sims.score());
+                            debug!(?item, ?path, ?sims, score = ?sims.score());
                             hits.push(Hit {
+                                id: item.id,
                                 name: item.name.clone().unwrap(), // SAFETY: all functions has its name.
                                 path,
-                                link,
                                 docs: item.docs.clone(),
                                 signature: format_fn_signature(
                                     item.name.as_deref().unwrap_or(""),
-                                    &f.decl,
+                                    &f.sig,
                                 ),
                                 similarities: sims,
                             });
@@ -120,24 +125,25 @@ impl Index {
                             })
                             .collect::<Result<Vec<_>>>()?;
                         for assoc_item in assoc_items {
-                            if let types::ItemEnum::Method(ref m) = assoc_item.inner {
-                                let (path, link) = Self::path_and_link(
+                            if let types::ItemEnum::Function(ref m) = assoc_item.inner {
+                                let path = Self::path_and_link(
                                     krate,
                                     &krate_name,
                                     assoc_item,
                                     Some(impl_),
+                                    &parents,
                                 )?;
                                 let sims = self.compare(query, assoc_item, krate, Some(impl_));
 
                                 if sims.score() < threshold {
                                     hits.push(Hit {
+                                        id: assoc_item.id,
                                         name: assoc_item.name.clone().unwrap(), // SAFETY: all methods has its name.
                                         path,
-                                        link,
                                         docs: assoc_item.docs.clone(),
                                         signature: format_fn_signature(
                                             assoc_item.name.as_deref().unwrap_or(""),
-                                            &m.decl,
+                                            &m.sig,
                                         ),
                                         similarities: sims,
                                     })
@@ -172,13 +178,12 @@ impl Index {
                 .where_predicates
                 .push(types::WherePredicate::EqPredicate {
                     lhs: types::Type::Generic("Self".to_owned()),
-                    rhs: impl_.for_.clone(),
+                    rhs: types::Term::Type(impl_.for_.clone()),
                 });
         } else {
             generics = types::Generics::default()
         }
         let mut substs = HashMap::default();
-
         let sims = query.compare(item, krate, &mut generics, &mut substs);
         Similarities(sims)
     }
@@ -191,117 +196,109 @@ impl Index {
         krate_name: &str,
         item: &types::Item,
         impl_: Option<&types::Impl>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
-        assert!(matches!(
-            item.inner,
-            types::ItemEnum::Function(_) | types::ItemEnum::Method(_)
-        ));
+        parents: &HashMap<types::Id, Parent>,
+    ) -> Result<crate::Path> {
+        assert!(matches!(item.inner, types::ItemEnum::Function(_)));
 
         use types::Type;
 
-        let get_path = |id: &types::Id| -> Result<Vec<String>> {
-            let path = krate
-                .paths
-                .get(id)
-                .ok_or_else(|| SearchError::ItemNotFound(id.0.clone(), krate_name.to_owned()))?
-                .path
-                .clone();
-
-            Ok(path)
+        let get_path = |id: &types::Id| -> Result<crate::Path> {
+            // if let Some(p) = krate.paths.get(id) {
+            //     // let path = Path {
+            //     //     modules: p.path[..p.path.len() - 1].to_vec(),
+            //     //     owner: None,
+            //     //     item: Item
+            //     // };
+            //     todo!()
+            // }
+            if let Some(segs) = reconstruct_path_for_local(krate, krate_name, id, parents) {
+                return Ok(segs);
+            }
+            Err(SearchError::ItemNotFound(
+                id.0.clone(),
+                krate_name.to_owned(),
+            ))
         };
 
         // If `item` is a associated item, replace the last segment of the path for the link of the ADT
         // it is binded to.
-        let mut path;
-        let mut link;
-        if let Some(impl_) = impl_ {
-            let recv;
-            match (&impl_.for_, &impl_.trait_) {
-                (_, Some(ref t)) => {
-                    if let Type::ResolvedPath { name, id, .. } = t {
-                        path = get_path(id)?;
-                        recv = format!("trait.{}.html", name);
-                    } else {
-                        // SAFETY: All traits are represented by `ResolvedPath`.
-                        unreachable!()
-                    }
-                }
-                (
-                    Type::ResolvedPath {
-                        ref name, ref id, ..
-                    },
-                    _,
-                ) => {
-                    path = get_path(id)?;
-                    let summary = krate.paths.get(id).ok_or_else(|| {
-                        SearchError::ItemNotFound(id.0.clone(), krate_name.to_owned())
-                    })?;
-                    match summary.kind {
-                        types::ItemKind::Union => recv = format!("union.{}.html", name),
-                        types::ItemKind::Enum => recv = format!("enum.{}.html", name),
-                        types::ItemKind::Struct => recv = format!("struct.{}.html", name),
-                        // SAFETY: ADTs are either unions or enums or structs.
-                        _ => unreachable!(),
-                    }
-                }
-                (Type::Primitive(ref prim), _) => {
-                    path = vec![prim.clone()];
-                    recv = format!("primitive.{}.html", prim);
-                }
-                (Type::Tuple(_), _) => {
-                    path = vec!["tuple".to_owned()];
-                    recv = "primitive.tuple.html".to_owned();
-                }
-                (Type::Slice(_), _) => {
-                    path = vec!["slice".to_owned()];
-                    recv = "primitive.slice.html".to_owned();
-                }
-                (Type::Array { .. }, _) => {
-                    path = vec!["array".to_owned()];
-                    recv = "primitive.array.html".to_owned();
-                }
-                (Type::RawPointer { .. }, _) => {
-                    path = vec!["pointer".to_owned()];
-                    recv = "primitive.pointer.html".to_owned();
-                }
-                (Type::BorrowedRef { .. }, _) => {
-                    path = vec!["reference".to_owned()];
-                    recv = "primitive.reference.html".to_owned();
-                }
-                _ => unreachable!(),
-            }
-            link = path.clone();
-            if let Some(l) = link.last_mut() {
-                *l = recv;
-            }
-        } else {
-            path = get_path(&item.id)?;
-            link = path.clone();
-        }
+        let path;
 
-        match item.inner {
-            types::ItemEnum::Function(_) => {
-                if let Some(l) = link.last_mut() {
-                    *l = format!("fn.{}.html", l);
-                }
-                Ok((path.clone(), link))
-            }
-            types::ItemEnum::Method(_) => {
-                let name = item.name.clone().unwrap(); // SAFETY: all methods has its name.
-                if let Some(l) = link.last_mut() {
-                    *l = format!("{}#method.{}", l, &name);
-                }
-                path.push(name);
+        // if let Some(impl_) = impl_ {
+        //     let recv;
+        //     match (&impl_.for_, &impl_.trait_) {
+        //         (_, Some(ref t)) => {
+        //             let types::Path { path: name, id, .. } = t;
+        //             path = get_path(&id)?;
+        //             recv = format!("trait.{}.html", name);
+        //         }
+        //         (
+        //             Type::ResolvedPath(Path {
+        //                 path: name, ref id, ..
+        //             }),
+        //             _,
+        //         ) => {
+        //             path = get_path(id)?;
+        //             let summary = krate.paths.get(id).ok_or_else(|| {
+        //                 SearchError::ItemNotFound(id.0.clone(), krate_name.to_owned())
+        //             })?;
+        //             match summary.kind {
+        //                 types::ItemKind::Union => recv = format!("union.{}.html", name),
+        //                 types::ItemKind::Enum => recv = format!("enum.{}.html", name),
+        //                 types::ItemKind::Struct => recv = format!("struct.{}.html", name),
+        //                 // SAFETY: ADTs are either unions or enums or structs.
+        //                 _ => unreachable!(),
+        //             }
+        //         }
+        //         (Type::Primitive(ref prim), _) => {
+        //             path = vec![prim.clone()];
+        //             recv = format!("primitive.{}.html", prim);
+        //         }
+        //         (Type::Tuple(_), _) => {
+        //             path = vec!["tuple".to_owned()];
+        //             recv = "primitive.tuple.html".to_owned();
+        //         }
+        //         (Type::Slice(_), _) => {
+        //             path = vec!["slice".to_owned()];
+        //             recv = "primitive.slice.html".to_owned();
+        //         }
+        //         (Type::Array { .. }, _) => {
+        //             path = vec!["array".to_owned()];
+        //             recv = "primitive.array.html".to_owned();
+        //         }
+        //         (Type::RawPointer { .. }, _) => {
+        //             path = vec!["pointer".to_owned()];
+        //             recv = "primitive.pointer.html".to_owned();
+        //         }
+        //         (Type::BorrowedRef { .. }, _) => {
+        //             path = vec!["reference".to_owned()];
+        //             recv = "primitive.reference.html".to_owned();
+        //         }
+        //         _ => unreachable!(),
+        //     }
+        //     link = path.clone();
+        //     if let Some(l) = link.last_mut() {
+        //         *l = recv;
+        //     }
+        // } else {
+        path = get_path(&item.id)?;
+        // }
 
-                Ok((path.clone(), link))
-            }
-            // SAFETY: Already asserted at the beginning of this function.
-            _ => unreachable!(),
-        }
+        Ok(path)
+        // match item.inner {
+        //     types::ItemEnum::Function(_) => {
+        //         if let Some(l) = link.last_mut() {
+        //             *l = format!("fn.{}.html", l);
+        //         }
+        //         Ok((path.clone(), link))
+        //     }
+        //     // SAFETY: Already asserted at the beginning of this function.
+        //     _ => unreachable!(),
+        // }
     }
 }
 
-fn format_fn_signature(name: &str, decl: &types::FnDecl) -> String {
+fn format_fn_signature(name: &str, decl: &types::FunctionSignature) -> String {
     let args = decl
         .inputs
         .iter()
@@ -322,28 +319,31 @@ fn format_fn_signature(name: &str, decl: &types::FnDecl) -> String {
 }
 
 fn render_type(t: &types::Type) -> String {
-    use types::Type::*;
     match t {
-        Primitive(p) => p.clone(),
-        Generic(g) => g.clone(),
-        Tuple(ts) => {
+        types::Type::Primitive(p) => p.clone(),
+        types::Type::Generic(g) => g.clone(),
+        types::Type::Tuple(ts) => {
             let inner = ts.iter().map(render_type).collect::<Vec<_>>().join(", ");
             format!("({})", inner)
         }
-        Slice(inner) => format!("[{}]", render_type(inner)),
-        Array { type_, .. } => format!("[{}]", render_type(type_)),
-        RawPointer { mutable, type_ } => {
-            let m = if *mutable { "mut" } else { "const" };
+        types::Type::Slice(inner) => format!("[{}]", render_type(inner)),
+        types::Type::Array { type_, .. } => format!("[{}]", render_type(type_)),
+        types::Type::RawPointer { is_mutable, type_ } => {
+            let m = if *is_mutable { "mut" } else { "const" };
             format!("*{} {}", m, render_type(type_))
         }
-        BorrowedRef { mutable, type_, .. } => {
-            let m = if *mutable { "mut " } else { "" };
+        types::Type::BorrowedRef {
+            is_mutable, type_, ..
+        } => {
+            let m = if *is_mutable { "mut " } else { "" };
             format!("&{}{}", m, render_type(type_))
         }
-        ResolvedPath { name, args, .. } => {
-            let mut s = name.clone();
-            if let Some(ga) = args {
-                if let types::GenericArgs::AngleBracketed { args, .. } = ga.as_ref() {
+        types::Type::ResolvedPath(path) => {
+            let mut s = path.path.clone();
+            if let Some(ga) = &path.args {
+                if let types::GenericArgs::AngleBracketed { args, .. } =
+                    (ga as &Box<GenericArgs>).as_ref()
+                {
                     let inner = args
                         .iter()
                         .filter_map(|ga| match ga {
@@ -361,7 +361,7 @@ fn render_type(t: &types::Type) -> String {
             }
             s
         }
-        QualifiedPath { name, .. } => name.clone(),
+        types::Type::QualifiedPath { name, .. } => name.clone(),
         _ => "_".to_string(),
     }
 }
@@ -373,22 +373,25 @@ mod tests {
     use super::*;
     use crate::compare::{DiscreteSimilarity::*, Similarity::*};
     use crate::query::{FnDecl, FnRetTy, Function};
+    use crate::types::{FunctionHeader, FunctionSignature, Target};
 
     fn krate() -> types::Crate {
         types::Crate {
-            root: types::Id("0:0".to_owned()),
+            name: Some("test-crate".to_owned()),
+            root: types::Id(0),
             crate_version: Some("0.0.0".to_owned()),
             includes_private: false,
             index: Default::default(),
             paths: Default::default(),
             external_crates: Default::default(),
             format_version: 0,
+            target: Target::default(),
         }
     }
 
     fn item(name: String, inner: types::ItemEnum) -> types::Item {
         types::Item {
-            id: types::Id("test".to_owned()),
+            id: types::Id(0),
             crate_id: 0,
             name: Some(name),
             span: None,
@@ -404,17 +407,17 @@ mod tests {
     /// Returns a function which will be expressed as `fn foo() -> ()`.
     fn foo() -> types::Function {
         types::Function {
-            decl: types::FnDecl {
-                inputs: vec![],
-                output: None,
-                c_variadic: false,
-            },
             generics: types::Generics {
                 params: vec![],
                 where_predicates: vec![],
             },
-            header: HashSet::default(),
-            abi: "rust".to_owned(),
+            header: FunctionHeader::default(),
+            sig: types::FunctionSignature {
+                inputs: vec![],
+                output: None,
+                is_c_variadic: false,
+            },
+            has_body: false,
         }
     }
 
