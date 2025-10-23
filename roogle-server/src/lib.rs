@@ -21,14 +21,14 @@ pub fn make_index(index_dir: &Path) -> Result<Index> {
     let mut entries = vec![];
     for entry in fs::read_dir(&crate_dir).context("failed to read index files")? {
         let path = entry?.path();
-        // Skip all raw .json if a .json.zst version exists
+        // Skip all raw .json if a .bin version exists
         if path.extension().and_then(|e| e.to_str()) == Some("json") {
             let bin_path = path.with_extension("bin");
             if bin_path.exists() {
                 continue;
             }
         }
-        // Only include .json or .json.zst files
+        // Only include .json or .bun files
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             if ext == "json" || ext == "bin" {
                 entries.push(path);
@@ -158,8 +158,19 @@ pub fn generate_bin_index(index_dir: &PathBuf) -> Result<()> {
                 .with_context(|| format!("failed to read `{:?}`", entry.file_name()))?;
             let mut deserializer = serde_json::Deserializer::from_str(&json);
             deserializer.disable_recursion_limit();
-            let krate = Crate::deserialize(&mut deserializer)
-                .with_context(|| format!("failed to deserialize `{:?}`", entry.file_name()))?;
+            tracing::debug!("generating bin for {:?}", entry.file_name());
+
+            let krate = Crate::deserialize(&mut deserializer);
+
+            let Ok(krate) = krate else {
+                warn!(
+                    "deserializing {:?} failed: {}",
+                    entry.file_name(),
+                    krate.unwrap_err()
+                );
+                return Ok(());
+            };
+
             let file_name = entry
                 .path()
                 .with_extension("")

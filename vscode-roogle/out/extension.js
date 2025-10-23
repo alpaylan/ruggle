@@ -39,6 +39,9 @@ const vscode = __importStar(require("vscode"));
 const https = __importStar(require("https"));
 const http = __importStar(require("http"));
 const node_child_process_1 = require("node:child_process");
+const os = __importStar(require("node:os"));
+const fs = __importStar(require("node:fs"));
+const path = __importStar(require("node:path"));
 async function fetchJson(url, signal) {
     // Prefer VS Code's global fetch when available
     if (typeof fetch !== 'undefined') {
@@ -307,13 +310,25 @@ async function ensureServer(cfg) {
     const auto = cfg.get('autoStart', true);
     if (!auto)
         return false;
-    const mode = cfg.get('serverMode', 'cargo');
+    const mode = cfg.get('serverMode', 'managed');
     const indexDir = cfg.get('indexDir', '');
     const repoRoot = cfg.get('repoRoot', '');
     const port = cfg.get('port', 8000);
     const cmdPath = cfg.get('serverCommand', '');
+    const managedServerUrl = cfg.get('managed.serverUrl', '');
+    const managedIndexUrl = cfg.get('managed.indexUrl', '');
     try {
-        if (mode === 'cargo') {
+        if (mode === 'managed') {
+            const bin = await installManagedBinary(managedServerUrl);
+            const idx = await installManagedIndex(managedIndexUrl);
+            const args = [];
+            if (idx) {
+                args.push('--index', idx);
+            }
+            serverProc = (0, node_child_process_1.spawn)(bin, args);
+            outChan?.appendLine(`[Roogle] Starting managed server: ${bin} ${args.join(' ')}`);
+        }
+        else if (mode === 'cargo') {
             const args = ['run', '-p', 'roogle-server', '--bin', 'roogle-server', '--release'];
             if (indexDir)
                 args.push('--', '--index', indexDir);
@@ -366,5 +381,59 @@ async function isHealthy(host) {
     catch {
         return false;
     }
+}
+async function installManagedBinary(explicitUrl) {
+    const storage = getStoragePath();
+    const binDir = path.join(storage, 'server');
+    const platform = os.platform();
+    const arch = os.arch();
+    const binName = platform === 'win32' ? 'roogle-server.exe' : 'roogle-server';
+    const binPath = path.join(binDir, binName);
+    if (fs.existsSync(binPath))
+        return binPath;
+    await fs.promises.mkdir(binDir, { recursive: true });
+    const url = explicitUrl || getDefaultServerUrl(platform, arch);
+    await downloadFile(url, binPath + '.download');
+    await fs.promises.rename(binPath + '.download', binPath);
+    if (platform !== 'win32')
+        await fs.promises.chmod(binPath, 0o755);
+    return binPath;
+}
+async function installManagedIndex(explicitUrl) {
+    if (!explicitUrl)
+        return undefined;
+    const storage = getStoragePath();
+    const idxDir = path.join(storage, 'index');
+    await fs.promises.mkdir(idxDir, { recursive: true });
+    const archivePath = path.join(idxDir, 'index.tgz');
+    await downloadFile(explicitUrl, archivePath);
+    // naive extract: rely on server to read the directory if you unpack; here we keep archive path not used.
+    return idxDir;
+}
+function getStoragePath() {
+    const ext = vscode.extensions.getExtension('AlperenKeles.roogle');
+    const storage = ext?.extensionPath ? path.join(ext.extensionPath, '.roogle') : os.tmpdir();
+    if (!fs.existsSync(storage))
+        fs.mkdirSync(storage, { recursive: true });
+    return storage;
+}
+async function downloadFile(url, dest) {
+    const controller = new AbortController();
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok)
+        throw new Error(`${res.status} ${res.statusText}`);
+    const buf = await res.arrayBuffer();
+    await fs.promises.writeFile(dest, Buffer.from(buf));
+}
+function getDefaultServerUrl(platform, arch) {
+    // Placeholder mapping; to be replaced with real release URLs.
+    const base = 'https://github.com/alpaylan/roogle/releases/latest/download';
+    if (platform === 'darwin' && arch === 'arm64')
+        return `${base}/roogle-server-macos-arm64`;
+    if (platform === 'darwin')
+        return `${base}/roogle-server-macos-x64`;
+    if (platform === 'win32')
+        return `${base}/roogle-server-windows-x64.exe`;
+    return `${base}/roogle-server-linux-x64`;
 }
 //# sourceMappingURL=extension.js.map

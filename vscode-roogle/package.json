@@ -111,6 +111,16 @@
                     "type": "string",
                     "default": "",
                     "description": "Working directory for cargo mode (path to Roogle repo root)"
+                },
+                "roogle.managed.serverUrl": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Direct URL to roogle-server binary for your platform (managed mode)"
+                },
+                "roogle.managed.indexUrl": {
+                    "type": "string",
+                    "default": "",
+                    "description": "URL to bundled std/core/alloc index archive (tar.gz or zip)"
                 }
             }
         }
