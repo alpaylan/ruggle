@@ -1,8 +1,8 @@
-use std::{collections::HashMap, path};
+use std::collections::HashMap;
 
 use crate::{
     build_parent_index, reconstruct_path_for_local,
-    types::{self, GenericArgs, Item, Path},
+    types::{self, GenericArgs},
     Parent,
 };
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,8 @@ use crate::{
 pub struct Hit {
     pub id: types::Id,
     pub name: String,
-    pub path: crate::Path,
+    pub path: Vec<String>,
+    pub link: String,
     pub docs: Option<String>,
     pub signature: String,
     #[serde(skip_serializing, skip_deserializing)]
@@ -50,7 +51,7 @@ pub enum SearchError {
 pub type Result<T> = std::result::Result<T, SearchError>;
 
 /// Represents a scope to search in.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Scope {
     /// Represetns a single crate.
     Crate(String),
@@ -60,14 +61,26 @@ pub enum Scope {
     /// For example:
     /// - `rustc_ast`, `rustc_ast_lowering`, `rustc_passes` and `rustc_ast_pretty`
     /// - `std`, `core` and `alloc`
-    Set(Vec<String>),
+    Set(String, Vec<String>),
 }
 
 impl Scope {
+    pub fn url(&self) -> String {
+        match self {
+            Scope::Crate(name) => format!(
+                "https://raw.githubusercontent.com/alpaylan/roogle-index/main/crate/{}.bin",
+                name
+            ),
+            Scope::Set(name, _) => format!(
+                "https://raw.githubusercontent.com/alpaylan/roogle-index/main/set/{}.json",
+                name
+            ),
+        }
+    }
     pub fn flatten(self) -> Vec<String> {
         match self {
             Scope::Crate(krate) => vec![krate],
-            Scope::Set(krates) => krates,
+            Scope::Set(_, krates) => krates,
         }
     }
 }
@@ -104,7 +117,8 @@ impl Index {
                             hits.push(Hit {
                                 id: item.id,
                                 name: item.name.clone().unwrap(), // SAFETY: all functions has its name.
-                                path,
+                                path: path.pathify(),
+                                link: path.link(),
                                 docs: item.docs.clone(),
                                 signature: format_fn_signature(
                                     item.name.as_deref().unwrap_or(""),
@@ -120,7 +134,7 @@ impl Index {
                             .iter()
                             .map(|id| {
                                 krate.index.get(id).ok_or_else(|| {
-                                    SearchError::ItemNotFound(id.0.clone(), krate_name.clone())
+                                    SearchError::ItemNotFound(id.0, krate_name.clone())
                                 })
                             })
                             .collect::<Result<Vec<_>>>()?;
@@ -139,7 +153,8 @@ impl Index {
                                     hits.push(Hit {
                                         id: assoc_item.id,
                                         name: assoc_item.name.clone().unwrap(), // SAFETY: all methods has its name.
-                                        path,
+                                        path: path.pathify(),
+                                        link: path.link(),
                                         docs: assoc_item.docs.clone(),
                                         signature: format_fn_signature(
                                             assoc_item.name.as_deref().unwrap_or(""),
@@ -195,12 +210,10 @@ impl Index {
         krate: &types::Crate,
         krate_name: &str,
         item: &types::Item,
-        impl_: Option<&types::Impl>,
+        _impl_: Option<&types::Impl>,
         parents: &HashMap<types::Id, Parent>,
     ) -> Result<crate::Path> {
         assert!(matches!(item.inner, types::ItemEnum::Function(_)));
-
-        use types::Type;
 
         let get_path = |id: &types::Id| -> Result<crate::Path> {
             // if let Some(p) = krate.paths.get(id) {
@@ -214,15 +227,11 @@ impl Index {
             if let Some(segs) = reconstruct_path_for_local(krate, krate_name, id, parents) {
                 return Ok(segs);
             }
-            Err(SearchError::ItemNotFound(
-                id.0.clone(),
-                krate_name.to_owned(),
-            ))
+            Err(SearchError::ItemNotFound(id.0, krate_name.to_owned()))
         };
 
         // If `item` is a associated item, replace the last segment of the path for the link of the ADT
         // it is binded to.
-        let path;
 
         // if let Some(impl_) = impl_ {
         //     let recv;
@@ -281,7 +290,7 @@ impl Index {
         //         *l = recv;
         //     }
         // } else {
-        path = get_path(&item.id)?;
+        let path = get_path(&item.id)?;
         // }
 
         Ok(path)
@@ -373,7 +382,7 @@ mod tests {
     use super::*;
     use crate::compare::{DiscreteSimilarity::*, Similarity::*};
     use crate::query::{FnDecl, FnRetTy, Function};
-    use crate::types::{FunctionHeader, FunctionSignature, Target};
+    use crate::types::{FunctionHeader, Target};
 
     fn krate() -> types::Crate {
         types::Crate {

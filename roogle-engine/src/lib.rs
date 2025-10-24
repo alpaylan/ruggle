@@ -49,6 +49,23 @@ impl Display for Path {
 }
 
 impl Path {
+    pub fn pathify(&self) -> Vec<String> {
+        let mut path = Vec::new();
+        for m in &self.modules {
+            if let Some(name) = &m.name {
+                path.push(name.clone());
+            }
+        }
+        if let Some(owner) = &self.owner {
+            if let Some(name) = &owner.name {
+                path.push(name.clone());
+            }
+        }
+        if let Some(name) = &self.item.name {
+            path.push(name.clone());
+        }
+        path
+    }
     pub fn link(&self) -> String {
         let mut link = String::new();
         for m in &self.modules {
@@ -127,7 +144,7 @@ fn build_parent_index(krate: &types::Crate) -> HashMap<types::Id, Parent> {
 /// Fallback: reconstruct a lexical module path for *local* items.
 fn reconstruct_path_for_local(
     krate: &types::Crate,
-    krate_name: &str,
+    _krate_name: &str,
     id: &types::Id,
     parents: &HashMap<types::Id, Parent>,
 ) -> Option<Path> {
@@ -155,7 +172,7 @@ fn reconstruct_path_for_local(
                         break;
                     }
                 }
-                if let Some(mname) = mi.name.as_deref() {
+                if let Some(_mname) = mi.name.as_deref() {
                     path.modules.push(mi.clone());
                 }
                 walker = Some(cur);

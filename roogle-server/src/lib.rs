@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::BufReader,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use anyhow::{Context, Result};
@@ -44,7 +44,7 @@ pub fn make_index(index_dir: &Path) -> Result<Index> {
     let crates: HashMap<String, _> = entries
         .par_iter()
         .filter_map(|path| {
-            let file = File::open(&path).ok()?;
+            let file = File::open(path).ok()?;
             let mut reader = BufReader::new(file);
 
             let ext = path.extension().and_then(|e| e.to_str());
@@ -75,7 +75,8 @@ pub fn make_index(index_dir: &Path) -> Result<Index> {
             krate.name = path.file_stem()?.to_str()?.to_owned().into();
             debug!("deserialized {:?} in {:?}", path.display(), t0.elapsed());
 
-            Some((path.file_prefix()?.to_str()?.to_owned(), krate))
+            // Rust 1.90 does not support `Path::file_prefix`, use `file_stem` instead
+            Some((path.file_stem()?.to_str()?.to_owned(), krate))
         })
         .collect();
 
@@ -98,7 +99,7 @@ fn dir_size(path: &std::path::Path) -> u64 {
         .sum()
 }
 
-pub fn shake_index(index_dir: &PathBuf) -> Result<()> {
+pub fn shake_index(index_dir: &Path) -> Result<()> {
     // Measure index size before shaking
     let before = dir_size(&index_dir.join("crate"));
     let result = std::fs::read_dir(format!("{}/crate", index_dir.display()))
@@ -145,8 +146,8 @@ pub fn shake_index(index_dir: &PathBuf) -> Result<()> {
     result.map(|_| ())
 }
 
-pub fn generate_bin_index(index_dir: &PathBuf) -> Result<()> {
-    let result = std::fs::read_dir(format!("{}/crate", index_dir.display()))
+pub fn generate_bin_index(index_dir: &Path) -> Result<()> {
+    let _result = std::fs::read_dir(format!("{}/crate", index_dir.display()))
         .context("failed to read index files")?
         .map(|entry| {
             let entry = entry?;
@@ -233,7 +234,7 @@ pub fn make_scopes(index_dir: &Path) -> Result<Scopes> {
                         let krates = serde_json::from_str::<Vec<String>>(&json)
                             .context(format!("failed to deserialize set `{}`", &set))?;
 
-                        Ok((set, Scope::Set(krates)))
+                        Ok((set.clone(), Scope::Set(set, krates)))
                     })
                     .filter_map(|res: Result<_, anyhow::Error>| {
                         if let Err(ref e) = res {

@@ -89,7 +89,7 @@ fn perform_search(
         .with_context(|| format!("search with query `{:?}` failed", query))?;
     let hits = hits
         .into_iter()
-        .inspect(|hit| debug!(?hit.name, link = ?hit.path.link(), similarities = ?hit.similarities(), score = ?hit.similarities().score()))
+        .inspect(|hit| debug!(?hit.name, link = ?hit.link, path = ?hit.path, similarities = ?hit.similarities(), score = ?hit.similarities().score()))
         .take(limit)
         .collect::<Vec<_>>();
 
@@ -109,7 +109,7 @@ async fn ask_server(
         "{}/search?scope={}&query={}&limit={}&threshold={}",
         host,
         urlencoding::encode(scope),
-        urlencoding::encode(&query),
+        urlencoding::encode(query),
         limit,
         threshold
     );
@@ -186,14 +186,13 @@ async fn main() -> Result<()> {
     }
 
     for (i, h) in hits.iter().enumerate() {
-        let path = h.path.to_string();
-        let link = format!("https://doc.rust-lang.org/{}", h.path.link());
+        let link = format!("https://doc.rust-lang.org/{}", h.link);
         println!(
             "{:>2}. {} ({})  ({}) ({})\n    {}",
             i + 1,
             h.name,
             h.id.0,
-            path,
+            h.path.join("::"),
             h.signature,
             link
         );

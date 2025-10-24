@@ -1,10 +1,7 @@
 [workspace]
+resolver = "2"
 members = [
     "roogle-server",
     "roogle-engine",
     "roogle-util",
-    "roogle-index/indexer"
-]
-exclude = [
-    "roogle-index/rust",
 ]

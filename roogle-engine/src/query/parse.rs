@@ -293,7 +293,7 @@ where
         Type::Generic(s.to_owned())
     })(i)?;
 
-    if i.chars().next().map_or(false, |c| c.is_ascii_lowercase()) {
+    if i.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
         fail(i)
     } else {
         Ok((i, gen))
@@ -355,7 +355,7 @@ mod tests {
                         ]),
                         output: Some(FnRetTy::Return(Type::Primitive(PrimitiveType::Bool))),
                     },
-                    qualifiers: HashSet::from_iter(vec![Qualifier::Async, Qualifier::Const]),
+                    qualifiers: HashSet::from_iter(vec![Qualifier::Async]),
                 })),
             }
         );

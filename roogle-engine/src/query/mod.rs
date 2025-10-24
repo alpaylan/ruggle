@@ -5,8 +5,6 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::types;
-
 pub mod parse;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

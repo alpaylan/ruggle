@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use serde::{de, Deserialize, Deserializer, Serialize};
 
 use crate::query::Qualifier;
-use rustdoc_types;
 
 /// The root of the emitted JSON blob.
 ///

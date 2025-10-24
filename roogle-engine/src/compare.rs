@@ -5,7 +5,7 @@ use std::{
 
 use levenshtein::levenshtein;
 
-use tracing::{info, instrument, trace};
+use tracing::{instrument, trace};
 
 use crate::{
     query::*,
@@ -35,7 +35,7 @@ impl Similarity {
 
 use Similarity::*;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Similarities(pub Vec<Similarity>);
 
 impl Similarities {
@@ -49,12 +49,6 @@ impl Similarities {
 impl PartialOrd for Similarities {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         (self.score()).partial_cmp(&other.score())
-    }
-}
-
-impl Default for Similarities {
-    fn default() -> Self {
-        Similarities(Vec::new())
     }
 }
 
@@ -329,10 +323,7 @@ fn compare_type(
                     // FIXME: Previously this code assumed `i` is always found, but it apparently changed.
                     vec![Discrete(Subequal)]
                 }
-                Some(i) => {
-                    let sims = q.compare(&i, krate, generics, substs);
-                    return sims;
-                }
+                Some(i) => q.compare(&i, krate, generics, substs),
             }
         }
         (q, Type::Generic(i)) => match substs.get(i) {

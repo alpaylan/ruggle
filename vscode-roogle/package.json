@@ -2,7 +2,7 @@
     "name": "roogle",
     "displayName": "Roogle",
     "description": "Search Rust APIs with Roogle",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "publisher": "AlperenKeles",
     "license": "MIT",
     "engines": {
@@ -19,7 +19,9 @@
         "onCommand:roogle.showLogs",
         "onCommand:roogle.setScope",
         "onCommand:roogle.startServer",
-        "onCommand:roogle.stopServer"
+        "onCommand:roogle.stopServer",
+        "onCommand:roogle.updateIndex",
+        "onCommand:roogle.installLibstdIndex"
     ],
     "main": "out/extension.js",
     "contributes": {
@@ -51,6 +53,18 @@
             {
                 "command": "roogle.stopServer",
                 "title": "Roogle: Stop Server"
+            },
+            {
+                "command": "roogle.updateIndex",
+                "title": "Roogle: Add/Update Crate in Index"
+            },
+            {
+                "command": "roogle.installLibstdIndex",
+                "title": "Roogle: Install libstd/core/alloc Index"
+            },
+            {
+                "command": "roogle.listIndexed",
+                "title": "Roogle: List Indexed Crates"
             }
         ],
         "configuration": {
@@ -85,11 +99,12 @@
                 "roogle.serverMode": {
                     "type": "string",
                     "enum": [
+                        "managed",
                         "cargo",
                         "binary",
                         "docker"
                     ],
-                    "default": "cargo",
+                    "default": "managed",
                     "description": "How to start the local server when autoStart is enabled"
                 },
                 "roogle.serverCommand": {

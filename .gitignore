@@ -12,4 +12,4 @@ Cargo.lock
 **/indexer-rustc/
 **/indexer-crates/
 **/out/
-**.vsix
+**/*.vsix
