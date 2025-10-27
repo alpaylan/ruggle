@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, fs, fs::File, sync::Arc};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::Result;
 use axum::body::Bytes;
 use axum::{
     extract::{Query, State},
@@ -11,7 +11,12 @@ use axum::{
     Json, Router,
 };
 
-use roogle_server::make_index;
+use roogle_engine::search::{Hit, Scope};
+use roogle_engine::types::CrateMetadata;
+use roogle_server::{
+    index_local_crate, make_index, make_sets, perform_search, pull_crate_from_remote_index,
+    pull_set_from_remote_index, Scopes,
+};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 use tokio::sync::{Notify, RwLock};
@@ -20,14 +25,9 @@ use tower_http::{
     services::ServeDir,
     trace::TraceLayer,
 };
-use tracing::{debug, warn};
 
-use roogle_engine::types;
-use roogle_engine::{
-    query::parse::parse_query,
-    search::{Hit, Scope},
-    Index,
-};
+use roogle_engine::Index;
+use roogle_engine::{build_parent_index, types};
 
 const STATIC_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
 
@@ -56,7 +56,8 @@ async fn search_get(
         .ok_or((StatusCode::BAD_REQUEST, "missing query".to_string()))?;
     let state = state.read().await;
     perform_search(
-        &state,
+        &state.index,
+        &state.scopes,
         query_str,
         &params.scope,
         params.limit,
@@ -84,7 +85,8 @@ async fn search_post(
         .ok_or((StatusCode::BAD_REQUEST, "missing query".to_string()))?;
     let state = state.read().await;
     perform_search(
-        &state,
+        &state.index,
+        &state.scopes,
         query_str,
         &params.scope,
         params.limit,
@@ -102,50 +104,6 @@ fn internal_or_bad_request(e: anyhow::Error) -> (StatusCode, String) {
     } else {
         (StatusCode::INTERNAL_SERVER_ERROR, msg)
     }
-}
-
-fn perform_search(
-    state: &AppState,
-    query_str: &str,
-    scope_str: &str,
-    limit: Option<usize>,
-    threshold: Option<f32>,
-) -> anyhow::Result<Vec<Hit>> {
-    let scope = match scope_str.split(':').collect::<Vec<_>>().as_slice() {
-        ["set", set] => state
-            .scopes
-            .sets
-            .get(*set)
-            .context(format!("set `{}` not found", set))?,
-        ["crate", krate] => state
-            .scopes
-            .krates
-            .get(*krate)
-            .context(format!("krate `{}` not found", krate))?,
-        _ => Err(anyhow!("parsing scope `{}` failed", scope_str))?,
-    };
-    debug!(?scope);
-
-    let query = parse_query(query_str)
-        .ok()
-        .context(format!("parsing query `{}` failed", query_str))?
-        .1;
-    debug!(?query);
-
-    let limit = limit.unwrap_or(30);
-    let threshold = threshold.unwrap_or(0.4);
-
-    let hits = state
-        .index
-        .search(&query, scope.clone(), threshold)
-        .with_context(|| format!("search with query `{:?}` failed", query))?;
-    let hits = hits
-        .into_iter()
-        .inspect(|hit| debug!(?hit.name, link = ?hit.link, similarities = ?hit.similarities(), score = ?hit.similarities().score()))
-        .take(limit)
-        .collect::<Vec<_>>();
-
-    Ok(hits)
 }
 
 async fn scopes_handler(State(state): State<Arc<RwLock<AppState>>>) -> Json<Vec<String>> {
@@ -181,8 +139,14 @@ async fn main() {
     let index_dir: PathBuf = opt
         .index
         .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../roogle-index")));
-    let index = make_index(&index_dir).expect("failed to build index");
-    let scopes = make_scopes(&index_dir).expect("failed to build scopes");
+    let index = make_index(&index_dir).await.expect("failed to build index");
+    let sets = make_sets(Path::new(&index_dir));
+    let krates = index
+        .crates
+        .keys()
+        .map(|k| (k.clone(), Scope::Crate(k.clone())))
+        .collect();
+    let scopes = roogle_server::Scopes { sets, krates };
     let shutdown_notify = Arc::new(Notify::new());
     let state = Arc::new(RwLock::new(AppState {
         index,
@@ -195,22 +159,22 @@ async fn main() {
         "libstd".to_string(),
         Scope::Set(
             "libstd".to_string(),
-            vec!["std".to_string(), "core".to_string(), "alloc".to_string()],
+            vec![
+                CrateMetadata::new("std".to_string()),
+                CrateMetadata::new("core".to_string()),
+                CrateMetadata::new("alloc".to_string()),
+            ],
         ),
     );
 
-    state
-        .write()
-        .await
-        .scopes
-        .krates
-        .insert("std".to_string(), Scope::Crate("std".to_string()));
-    state
-        .write()
-        .await
-        .scopes
-        .krates
-        .insert("core".to_string(), Scope::Crate("core".to_string()));
+    state.write().await.scopes.krates.insert(
+        CrateMetadata::new("std".to_string()),
+        Scope::Crate(CrateMetadata::new("std".to_string())),
+    );
+    state.write().await.scopes.krates.insert(
+        CrateMetadata::new("core".to_string()),
+        Scope::Crate(CrateMetadata::new("core".to_string())),
+    );
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -222,6 +186,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/index", get(index_get).post(update_index))
+        .route("/index/local", post(update_local_index))
         .route("/search", get(search_get).post(search_post))
         .route("/healthz", get(healthz))
         .route("/stop", post(stop))
@@ -270,16 +235,12 @@ async fn index_page() -> Result<Html<String>, (StatusCode, String)> {
 }
 
 fn init_logger() {
-    use tracing_subscriber::{fmt, EnvFilter};
-
-    let filter = match std::env::var("ROOGLE_LOG") {
-        Ok(env) => EnvFilter::new(env),
-        _ => return,
-    };
-    fmt()
-        .with_env_filter(filter)
-        .pretty()
-        .with_target(true)
+    use tracing_subscriber::EnvFilter;
+    tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_file(true)
+        .with_line_number(true)
+        .without_time()
         .init();
 }
 
@@ -303,11 +264,13 @@ async fn stop(State(state): State<Arc<RwLock<AppState>>>) -> StatusCode {
 }
 
 /// Return the list of currently indexed crate names (in-memory index keys).
-async fn index_get(State(state): State<Arc<RwLock<AppState>>>) -> Json<Vec<String>> {
+async fn index_get(State(state): State<Arc<RwLock<AppState>>>) -> Json<Vec<CrateMetadata>> {
     let state = state.read().await;
-    let mut names: Vec<String> = state.index.crates.keys().cloned().collect();
-    names.sort();
-    Json(names)
+    let mut metadata: Vec<CrateMetadata> = state.index.crates.keys().cloned().collect();
+    tracing::info!("returning {} indexed crates", metadata.len());
+    metadata.sort();
+    tracing::debug!("indexed crates: {:?}", metadata);
+    Json(metadata)
 }
 
 #[derive(Deserialize)]
@@ -321,141 +284,232 @@ async fn update_index(
     State(state): State<Arc<RwLock<AppState>>>,
     Json(req): Json<IndexRequest>,
 ) -> Result<Json<String>, StatusCode> {
+    tracing::debug!("update_index request: {:?}", req.scopes);
     if req.scopes.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let client = reqwest::Client::new();
+
     let mut updated = 0usize;
     for scope in req.scopes {
-        let url = scope.url();
-        let urls = match scope {
-            Scope::Crate(_) => vec![url],
+        let krates = match scope {
+            Scope::Crate(krate) => vec![krate],
             Scope::Set(scope, _) => {
-                // fetch the original URL of the set to get the list of crates
-                tracing::debug!("Fetching set URL '{url}'");
-                let res = client
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|_| StatusCode::BAD_GATEWAY)?;
-                // Parse as `Vec<String>`
-                let mut crates = vec![];
-                if res.status().is_success() {
-                    let bytes = res.bytes().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
-                    crates = serde_json::from_slice::<Vec<String>>(&bytes)
-                        .map_err(|_| StatusCode::BAD_GATEWAY)?
-                }
+                let krates = pull_set_from_remote_index(&scope).await.map_err(|e| {
+                    tracing::error!("pulling set `{}` failed: {}", scope, e);
+                    StatusCode::BAD_GATEWAY
+                })?;
                 {
                     state
                         .write()
                         .await
                         .scopes
                         .sets
-                        .insert(scope.clone(), Scope::Set(scope, crates.clone()));
+                        .insert(scope.clone(), Scope::Set(scope, krates.clone()));
                 }
-                crates.into_iter().map(|s| Scope::Crate(s).url()).collect()
+                krates
             }
         };
-        for url in urls {
-            tracing::info!("fetching index url={}", url);
-            let res = client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|_| StatusCode::BAD_GATEWAY)?;
-            if !res.status().is_success() {
-                continue;
-            }
-            let bytes = res.bytes().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
 
-            if let Ok((mut krate, _len)) =
-                bincode::decode_from_slice::<types::Crate, _>(&bytes, bincode::config::standard())
+        for metadata in krates {
+            let krate = pull_crate_from_remote_index(&metadata).await.map_err(|e| {
+                tracing::error!("pulling crate `{}` failed: {}", metadata, e);
+                StatusCode::BAD_GATEWAY
+            })?;
+            // Build parent index
+            let parents = build_parent_index(&krate);
+            // Persist as .bin under <index_dir>/crate/<name>.bin
             {
-                // derive crate name from URL (last segment without extension)
-                let name = url
-                    .split('/')
-                    .next_back()
-                    .and_then(|seg| seg.split('.').next())
-                    .unwrap_or("")
-                    .to_string();
-                if name.is_empty() {
-                    tracing::warn!("skipping crate with empty name from {}", url);
-                    continue;
-                } else {
-                    krate.name = Some(name.clone());
-                }
-                // Persist as .bin under <index_dir>/crate/<name>.bin
-                {
-                    let state_read = state.read().await;
-                    let crate_dir = state_read.index_dir.join("crate");
-                    let _ = fs::create_dir_all(&crate_dir);
-                    let mut file = File::create(crate_dir.join(format!("{}.bin", name)))
-                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                    bincode::encode_into_std_write(&krate, &mut file, bincode::config::standard())
-                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                }
-                // Update in-memory index
-                {
-                    let mut state_write = state.write().await;
-                    state_write.index.crates.insert(name, krate);
-                }
-                updated += 1;
+                let state_read = state.read().await;
+                let crate_dir = state_read.index_dir.join("crate");
+                let _ = fs::create_dir_all(&crate_dir);
+                tracing::debug!("created crate directory: {}", crate_dir.display());
+
+                let mut file =
+                    File::create(crate_dir.join(format!("{}.bin", metadata))).map_err(|e| {
+                        tracing::error!("failed creating crate file for {}: {}", metadata, e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
+                tracing::debug!(
+                    "created crate file: {}",
+                    crate_dir.join(format!("{}.bin", metadata)).display()
+                );
+                bincode::encode_into_std_write(&krate, &mut file, bincode::config::standard())
+                    .map_err(|e| {
+                        tracing::error!("failed writing crate file for {}: {}", metadata, e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
+
+                let mut parents_file = File::create(
+                    crate_dir.join(format!("{}.parents.bin", metadata)),
+                )
+                .map_err(|e| {
+                    tracing::error!("failed creating parents file for {}: {}", metadata, e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+                bincode::encode_into_std_write(
+                    &parents,
+                    &mut parents_file,
+                    bincode::config::standard(),
+                )
+                .map_err(|e| {
+                    tracing::error!("failed writing parents file for {}: {}", metadata, e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
             }
+            // Update in-memory index
+            {
+                let mut state_write = state.write().await;
+                state_write.index.crates.insert(metadata.clone(), krate);
+                state_write.index.parents.insert(metadata.clone(), parents);
+                state_write
+                    .scopes
+                    .krates
+                    .insert(metadata.clone(), Scope::Crate(metadata));
+            }
+            updated += 1;
         }
     }
     Ok(Json(format!("updated {} crates", updated)))
 }
 
-struct Scopes {
-    sets: HashMap<String, Scope>,
-    krates: HashMap<String, Scope>,
+#[derive(Deserialize)]
+struct LocalIndexRequest {
+    cargo_manifest_path: PathBuf,
 }
 
-fn make_scopes(index_dir: &Path) -> Result<Scopes> {
-    let krates: HashMap<String, Scope> =
-        std::fs::read_dir(format!("{}/crate", index_dir.display()))
-            .context("failed to read crate files")?
-            .map(|entry| {
-                let entry = entry?;
-                let path = entry.path();
-                let krate = path.file_stem().unwrap().to_str().unwrap(); // SAFETY: files in `roogle-index` has a name.
+async fn update_local_index(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Json(req): Json<LocalIndexRequest>,
+) -> Result<Json<String>, StatusCode> {
+    // Verify that the path is `Cargo.toml`
+    if !req
+        .cargo_manifest_path
+        .file_name()
+        .map(|f| f == "Cargo.toml")
+        .unwrap_or(false)
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
-                Ok((krate.to_owned(), Scope::Crate(krate.to_owned())))
-            })
-            .filter_map(|res: Result<_, anyhow::Error>| {
-                if let Err(ref e) = res {
-                    warn!("registering a scope skipped: {}", e)
-                }
-                res.ok()
-            })
-            .collect();
-    let sets: HashMap<String, Scope> =
-        match std::fs::read_dir(format!("{}/set", index_dir.display())) {
-            Err(e) => {
-                warn!("registering sets skipped: {}", e);
-                HashMap::default()
-            }
-            Ok(entry) => {
-                entry
-                    .map(|entry| {
-                        let entry = entry?;
-                        let path = entry.path();
-                        let json = std::fs::read_to_string(&path)
-                            .context(format!("failed to read `{:?}`", path))?;
-                        let set = path.file_stem().unwrap().to_str().unwrap().to_owned(); // SAFETY: files in `roogle-index` has a name.
-                        let krates = serde_json::from_str::<Vec<String>>(&json)
-                            .context(format!("failed to deserialize set `{}`", &set))?;
+    let crates: Vec<types::Crate> = {
+        let mut state = state.write().await;
+        index_local_crate(&mut state.index, &req.cargo_manifest_path)
+            .await
+            .map_err(|e| {
+                tracing::error!("local index error: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+    };
+    // Persist the crates
+    for krate in &crates {
+        let crate_dir = state.read().await.index_dir.join("crate");
+        let _ = fs::create_dir_all(&crate_dir);
+        let mut file =
+            File::create(crate_dir.join(format!("{}.bin", krate.name.clone().unwrap_or_default())))
+                .map_err(|e| {
+                    tracing::error!(
+                        "failed creating crate file for {}: {}",
+                        krate.name.clone().unwrap_or_default(),
+                        e
+                    );
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+        bincode::encode_into_std_write(krate, &mut file, bincode::config::standard()).map_err(
+            |e| {
+                tracing::error!(
+                    "failed writing crate file for {}: {}",
+                    krate.name.clone().unwrap_or_default(),
+                    e
+                );
+                StatusCode::INTERNAL_SERVER_ERROR
+            },
+        )?;
+    }
 
-                        Ok((set.clone(), Scope::Set(set, krates)))
-                    })
-                    .filter_map(|res: Result<_, anyhow::Error>| {
-                        if let Err(ref e) = res {
-                            warn!("registering a scope skipped: {}", e)
-                        }
-                        res.ok()
-                    })
-                    .collect()
-            }
+    let parents = crates
+        .iter()
+        .map(|krate| {
+            (
+                krate.name.clone().expect("crate SHOULD HAVE a name"),
+                build_parent_index(krate),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    // Persist the parents
+    for (name, parents) in parents.iter() {
+        let crate_dir = state.read().await.index_dir.join("crate");
+        let _ = fs::create_dir_all(&crate_dir);
+        let mut parents_file = File::create(crate_dir.join(format!("{}.parents.bin", name)))
+            .map_err(|e| {
+                tracing::error!("failed creating parents file for {}: {}", name, e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        bincode::encode_into_std_write(parents, &mut parents_file, bincode::config::standard())
+            .map_err(|e| {
+                tracing::error!("failed writing parents file for {}: {}", name, e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+    }
+
+    let mut state = state.write().await;
+    let mut metadatas_for_set: Vec<CrateMetadata> = Vec::new();
+    for krate in crates {
+        let name = krate.name.clone().expect("crate SHOULD HAVE a name");
+        let metadata = CrateMetadata {
+            name: name.clone(),
+            version: krate.crate_version.clone(),
         };
-    Ok(Scopes { sets, krates })
+        state.index.crates.insert(metadata.clone(), krate);
+        state.index.parents.insert(
+            metadata.clone(),
+            parents
+                .get(&name)
+                .cloned()
+                .expect("crates index SHOULD BE in sync with the parents index"),
+        );
+        // Register individual crate scopes for convenience
+        state
+            .scopes
+            .krates
+            .insert(metadata.clone(), Scope::Crate(metadata.clone()));
+        metadatas_for_set.push(metadata);
+    }
+
+    // Create a new Set for this local project to make scope switching easy
+    let set_name = req
+        .cargo_manifest_path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .map(|s| format!("local-{}", s))
+        .unwrap_or_else(|| "local".to_string());
+
+    state.scopes.sets.insert(
+        set_name.clone(),
+        Scope::Set(set_name.clone(), metadatas_for_set.clone()),
+    );
+
+    // Persist the set so it shows up on restart as well
+    let set_dir = state.index_dir.join("set");
+    let _ = fs::create_dir_all(&set_dir);
+    if let Ok(json) = serde_json::to_string(&metadatas_for_set) {
+        let path = set_dir.join(format!("{}.json", set_name));
+        if let Err(e) = std::fs::write(&path, json) {
+            tracing::warn!(
+                "failed to persist set {} to {}: {}",
+                set_name,
+                path.display(),
+                e
+            );
+        }
+    } else {
+        tracing::warn!("failed to serialize set {} for persistence", set_name);
+    }
+
+    Ok(Json(format!(
+        "updated {} crates; created set:{}",
+        state.index.crates.len(),
+        set_name
+    )))
 }

@@ -3,19 +3,21 @@ pub mod query;
 pub mod search;
 pub mod types;
 
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::types::Crate;
+use crate::types::{Crate, CrateMetadata};
 use std::fmt::Display;
 
 use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub struct Index {
-    pub crates: HashMap<String, Crate>,
+    pub crates: HashMap<CrateMetadata, Crate>,
+    pub parents: HashMap<CrateMetadata, HashMap<types::Id, Parent>>,
 }
-#[derive(Clone, Copy, Debug)]
-enum Parent {
+#[derive(Clone, Copy, Debug, Encode, Decode)]
+pub enum Parent {
     Module(types::Id),
     Struct(types::Id),
     Trait(types::Id),
@@ -24,6 +26,7 @@ enum Parent {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Path {
+    pub name: String,
     pub modules: Vec<types::Item>,
     pub owner: Option<types::Item>,
     pub item: types::Item,
@@ -68,6 +71,11 @@ impl Path {
     }
     pub fn link(&self) -> String {
         let mut link = String::new();
+        if self.name == "std" || self.name == "core" || self.name == "alloc" {
+            link.push_str("https://doc.rust-lang.org/");
+        } else {
+            link.push_str(format!("https://docs.rs/{}/latest/", self.name).as_str());
+        }
         for m in &self.modules {
             if let Some(name) = &m.name {
                 link.push_str(&format!("{}/", name));
@@ -101,7 +109,7 @@ impl Path {
     }
 }
 
-fn build_parent_index(krate: &types::Crate) -> HashMap<types::Id, Parent> {
+pub fn build_parent_index(krate: &types::Crate) -> HashMap<types::Id, Parent> {
     let mut parent = HashMap::new();
     for (id, item) in &krate.index {
         match &item.inner {
@@ -133,7 +141,7 @@ fn build_parent_index(krate: &types::Crate) -> HashMap<types::Id, Parent> {
             _ => {}
         }
     }
-    println!(
+    tracing::info!(
         "Built parent index for crate {}",
         krate.name.clone().unwrap()
     );
@@ -144,7 +152,6 @@ fn build_parent_index(krate: &types::Crate) -> HashMap<types::Id, Parent> {
 /// Fallback: reconstruct a lexical module path for *local* items.
 fn reconstruct_path_for_local(
     krate: &types::Crate,
-    _krate_name: &str,
     id: &types::Id,
     parents: &HashMap<types::Id, Parent>,
 ) -> Option<Path> {
@@ -153,6 +160,7 @@ fn reconstruct_path_for_local(
     let item = krate.index.get(&cur).unwrap().clone();
 
     let mut path = Path {
+        name: krate.name.clone().unwrap_or_default(),
         modules: vec![],
         owner: None,
         item: item.clone(),

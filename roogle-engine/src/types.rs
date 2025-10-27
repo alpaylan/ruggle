@@ -13,12 +13,15 @@ use crate::query::Qualifier;
 /// tools to find or link to them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, bincode::Decode, bincode::Encode)]
 pub struct Crate {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// The id of the root [`Module`] item of the local crate.
     pub root: Id,
     /// The version string given to `--crate-version`, if any.
-    pub crate_version: Option<String>,
+    #[serde(
+        serialize_with = "crate_version_as_string",
+        deserialize_with = "crate_version_from_string"
+    )]
+    pub crate_version: String, // FIXME: This might cause problems because `rustdoc_types::crate_version` is optional.
     /// Whether or not the output includes private items.
     pub includes_private: bool,
     /// A collection of all items in the local crate as well as some external traits and their
@@ -33,6 +36,55 @@ pub struct Crate {
     /// A single version number to be used in the future when making backwards incompatible changes
     /// to the JSON output.
     pub format_version: u32,
+}
+
+fn crate_version_as_string<S>(version: &String, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    // Serialize the version as an Optional String for compatibility
+    serializer.serialize_some(version)
+}
+fn crate_version_from_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Deserialize the version from an Optional String for compatibility
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    Ok(opt.unwrap_or("latest".to_string()))
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CrateMetadata {
+    pub name: String,
+    pub version: String,
+}
+
+impl CrateMetadata {
+    pub fn new(name: String) -> Self {
+        CrateMetadata {
+            name,
+            version: "latest".to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for CrateMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.name, self.version)
+    }
+}
+
+impl Crate {
+    pub fn crate_metadata(&self) -> CrateMetadata {
+        CrateMetadata {
+            name: self
+                .name
+                .clone()
+                .expect("`.crate_metadata` SHOULD NEVER be called on anonymous crates"),
+            version: self.crate_version.clone(),
+        }
+    }
 }
 
 /// Information about a target

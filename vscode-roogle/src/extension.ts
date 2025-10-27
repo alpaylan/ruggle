@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import * as https from 'https';
-import * as http from 'http';
-import { spawn, ChildProcess } from 'node:child_process';
+import * as https from 'node:https';
+import * as http from 'node:http';
+import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -46,6 +47,25 @@ let serverProc: ChildProcess | undefined;
 type Scope =
     | { "Crate": string }
     | { "Set": [string, string[]] }
+
+// Types mirrored from the server's JSON schema
+interface Hit {
+    id: number;
+    name: string;
+    path: string[];
+    link: string;
+    docs?: string | null;
+    signature: string;
+}
+
+type CrateMetadata = {
+    name: string;
+    version: string;
+};
+
+function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : String(e);
+}
 
 export function activate(context: vscode.ExtensionContext) {
     outChan = vscode.window.createOutputChannel('Roogle');
@@ -95,10 +115,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     const setScopeCmd = vscode.commands.registerCommand('roogle.setScope', async () => {
         const cfg = vscode.workspace.getConfiguration('roogle');
-        const host: string = cfg.get('host', 'http://localhost:8000');
         const current: string = cfg.get('scope', 'set:libstd');
         try {
-            const scopes: string[] = await fetchJson(`${host}/scopes`);
+            const scopes: string[] = await withPortRecovery(cfg, async (h) => fetchJson(`${h}/scopes`));
             const picked = await vscode.window.showQuickPick(scopes, {
                 title: 'Roogle: Set Scope',
                 placeHolder: current,
@@ -107,8 +126,8 @@ export function activate(context: vscode.ExtensionContext) {
                 await cfg.update('scope', picked, vscode.ConfigurationTarget.Global);
                 vscode.window.showInformationMessage(`Roogle scope set to ${picked}`);
             }
-        } catch (e: any) {
-            vscode.window.showErrorMessage(`Roogle error: ${e.message || e}`);
+        } catch (e: unknown) {
+            vscode.window.showErrorMessage(`Roogle error: ${errorMessage(e)}`);
         }
     });
 
@@ -119,18 +138,16 @@ export function activate(context: vscode.ExtensionContext) {
     });
     const stopServerCmd = vscode.commands.registerCommand('roogle.stopServer', async () => {
         const cfg = vscode.workspace.getConfiguration('roogle');
-        const host: string = cfg.get('host', 'http://localhost:8000');
         try {
-            await fetch(`${host}/stop`, { method: 'POST', signal: AbortSignal.timeout(1000) });
+            await withPortRecovery(cfg, async (h) => fetch(`${h}/stop`, { method: 'POST', signal: AbortSignal.timeout(1000) }));
             outChan?.appendLine('[Roogle] Sent /stop');
-        } catch (e: any) {
-            outChan?.appendLine(`[Roogle] /stop failed: ${e?.message || e}`);
+        } catch (e: unknown) {
+            outChan?.appendLine(`[Roogle] /stop failed: ${errorMessage(e)}`);
         }
     });
 
     const updateIndexCmd = vscode.commands.registerCommand('roogle.updateIndex', async () => {
         const cfg = vscode.workspace.getConfiguration('roogle');
-        const host: string = cfg.get('host', 'http://localhost:8000');
         const input = await vscode.window.showInputBox({
             prompt: 'Enter crate:<name> or set:<name> (e.g., crate:std or set:libstd)',
             placeHolder: 'crate:std | set:libstd'
@@ -157,44 +174,51 @@ export function activate(context: vscode.ExtensionContext) {
         try {
             const scope = await buildScope();
             const scopes = { scopes: [scope] };
-            const target = `${host}/index`;
-            outChan?.appendLine(`[Roogle] POST ${target} scopes=${JSON.stringify(scopes)}`);
-            const res = await fetch(target, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(scopes),
-                signal: AbortSignal.timeout(30000),
-            });
-            const text = await res.text();
-            if (!res.ok) throw new Error(text || res.statusText);
+            const doPost = async (h: string) => {
+                const target = `${h}/index`;
+                outChan?.appendLine(`[Roogle] POST ${target} scopes=${JSON.stringify(scopes)}`);
+                const res = await fetch(target, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(scopes),
+                    signal: AbortSignal.timeout(30000),
+                });
+                const text = await res.text();
+                if (!res.ok) throw new Error(text || res.statusText);
+                return text;
+            };
+            const text = await withPortRecovery(cfg, doPost);
             vscode.window.showInformationMessage(`Index update: ${text}`);
             outChan?.appendLine(`[Roogle] Index update response: ${text}`);
-        } catch (e: any) {
-            vscode.window.showErrorMessage(`Index update failed: ${e?.message || e}`);
-            outChan?.appendLine(`[Roogle] Index update failed: ${e?.stack || e}`);
+        } catch (e: unknown) {
+            vscode.window.showErrorMessage(`Index update failed: ${errorMessage(e)}`);
+            outChan?.appendLine(`[Roogle] Index update failed: ${errorMessage(e)}`);
         }
     });
 
     const installLibstdCmd = vscode.commands.registerCommand('roogle.installLibstdIndex', async () => {
         const cfg = vscode.workspace.getConfiguration('roogle');
-        const host: string = cfg.get('host', 'http://localhost:8000');
         const base = 'https://raw.githubusercontent.com/alpaylan/roogle-index/main/crate';
         const names = ['std', 'core', 'alloc'];
         const urls = names.flatMap(n => [`${base}/${n}.bin`, `${base}/${n}.json`]);
         try {
-            const res = await fetch(`${host}/index`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ urls }),
-                signal: AbortSignal.timeout(20000),
-            });
-            const text = await res.text();
-            if (!res.ok) throw new Error(text || res.statusText);
+            const doPost = async (h: string) => {
+                const res = await fetch(`${h}/index`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls }),
+                    signal: AbortSignal.timeout(20000),
+                });
+                const text = await res.text();
+                if (!res.ok) throw new Error(text || res.statusText);
+                return text;
+            };
+            const text = await withPortRecovery(cfg, doPost);
             vscode.window.showInformationMessage(`Index update: ${text}`);
             outChan?.appendLine(`[Roogle] Index install libstd response: ${text}`);
-        } catch (e: any) {
-            vscode.window.showErrorMessage(`Index install failed: ${e?.message || e}`);
-            outChan?.appendLine(`[Roogle] Index install failed: ${e?.stack || e}`);
+        } catch (e: unknown) {
+            vscode.window.showErrorMessage(`Index install failed: ${errorMessage(e)}`);
+            outChan?.appendLine(`[Roogle] Index install failed: ${errorMessage(e)}`);
         }
     });
 
@@ -203,19 +227,55 @@ export function activate(context: vscode.ExtensionContext) {
         outChan?.appendLine('[Roogle] Logs opened');
     });
 
-    const listIndexedCmd = vscode.commands.registerCommand('roogle.listIndexed', async () => {
+    const indexCurrentProjectCmd = vscode.commands.registerCommand('roogle.indexCurrentProject', async () => {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) {
+            vscode.window.showInformationMessage('No workspace folder open');
+            return;
+        }
+        const root = folders[0].uri.fsPath;
+        const manifest = path.join(root, 'Cargo.toml');
+        if (!fs.existsSync(manifest)) {
+            vscode.window.showInformationMessage('No Cargo.toml found at the workspace root');
+            return;
+        }
         const cfg = vscode.workspace.getConfiguration('roogle');
-        const host: string = cfg.get('host', 'http://localhost:8000');
         try {
-            const names: string[] = await fetchJson(`${host}/index`);
-            const picked = await vscode.window.showQuickPick(names, { title: 'Indexed Crates' });
-            if (picked) { vscode.env.clipboard.writeText(picked); }
-        } catch (e: any) {
-            vscode.window.showErrorMessage(`Failed to list indexed: ${e?.message || e}`);
+            const doPost = async (h: string) => {
+                const target = `${h}/index/local`;
+                outChan?.appendLine(`[Roogle] POST ${target} cargo_manifest_path=${manifest}`);
+                const res = await fetch(target, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cargo_manifest_path: manifest }),
+                    signal: AbortSignal.timeout(120000),
+                });
+                const text = await res.text();
+                if (!res.ok) throw new Error(text || res.statusText);
+                return text;
+            };
+            const text = await withPortRecovery(cfg, doPost);
+            vscode.window.showInformationMessage(`Local index: ${text}`);
+            outChan?.appendLine(`[Roogle] Local index response: ${text}`);
+        } catch (e: unknown) {
+            vscode.window.showErrorMessage(`Local index failed: ${errorMessage(e)}`);
+            outChan?.appendLine(`[Roogle] Local index failed: ${errorMessage(e)}`);
         }
     });
 
-    context.subscriptions.push(searchCmd, searchSelCmd, setHostCmd, setScopeCmd, startServerCmd, stopServerCmd, updateIndexCmd, installLibstdCmd, listIndexedCmd, showLogsCmd);
+    const listIndexedCmd = vscode.commands.registerCommand('roogle.listIndexed', async () => {
+        const cfg = vscode.workspace.getConfiguration('roogle');
+        try {
+            const names: CrateMetadata[] = await withPortRecovery(cfg, async (h) => fetchJson(`${h}/index`));
+            outChan?.appendLine(`[Roogle] Indexed crates: ${names.map(n => n.name).join(', ')}`);
+            const picked = await vscode.window.showQuickPick(names.map(n => n.name), { title: 'Indexed Crates' });
+            if (picked) { vscode.env.clipboard.writeText(picked); }
+        } catch (e: unknown) {
+            vscode.window.showErrorMessage(`Failed to list indexed: ${errorMessage(e)}`);
+        }
+    });
+
+    context.subscriptions.push(searchCmd, searchSelCmd, setHostCmd, setScopeCmd, startServerCmd, stopServerCmd, updateIndexCmd, installLibstdCmd, listIndexedCmd, showLogsCmd, indexCurrentProjectCmd);
 }
 
 export function deactivate() { }
@@ -240,7 +300,9 @@ async function presentSearch(host: string, initialScope: string, query: string, 
 
     async function run(q: string) {
         if (q.length < 2) { qp.items = []; return; }
-        outChan?.appendLine(`[Roogle] run q='${q.slice(0, 120)}'… limit=${limit} threshold=${threshold} scope=${scope}`);
+        const cfg = vscode.workspace.getConfiguration('roogle');
+        let currentHost: string = cfg.get('host', host);
+        outChan?.appendLine(`[Roogle] run q='${q.slice(0, 120)}'… limit=${limit} threshold=${threshold} scope=${scope} host=${currentHost}`);
         tokenSrc.abort();
         tokenSrc = new AbortController();
         const params = new URLSearchParams();
@@ -249,36 +311,44 @@ async function presentSearch(host: string, initialScope: string, query: string, 
         params.set('threshold', String(threshold));
         qp.busy = true;
         try {
-            const getUrl = `${host}/search?${params.toString()}&query=${encodeURIComponent(q)}`;
-            outChan?.appendLine(`[Roogle] GET ${host}/search?${params.toString()}&query=${encodeURIComponent(q)}`);
-            let hits: any[] | null = null;
+            const getAttempt = async (h: string): Promise<Hit[]> => {
+                const getUrl = `${h}/search?${params.toString()}&query=${encodeURIComponent(q)}`;
+                outChan?.appendLine(`[Roogle] GET ${getUrl}`);
+                return fetchJson<Hit[]>(getUrl, tokenSrc.signal);
+            };
+            let hits: Hit[] | null = null;
             try {
-                hits = await fetchJson<any[]>(getUrl, tokenSrc.signal);
-            } catch (getErr: any) {
+                hits = await withPortRecovery(cfg, getAttempt);
+                currentHost = cfg.get('host', currentHost);
+            } catch (getErr: unknown) {
                 // Retry with POST body if GET fails (e.g., due to proxies or URL limits)
-                outChan?.appendLine(`[Roogle] GET failed: ${getErr?.message || getErr}`);
+                outChan?.appendLine(`[Roogle] GET failed: ${errorMessage(getErr)}`);
                 if (typeof fetch !== 'undefined') {
-                    const postUrl = `${host}/search?${params.toString()}&query=${encodeURIComponent(q)}`;
-                    outChan?.appendLine(`[Roogle] POST fallback ${host}/search?${params.toString()}&query=${encodeURIComponent(q)}`);
-                    const res = await fetch(postUrl, {
-                        method: 'POST',
-                        body: q,
-                        signal: tokenSrc.signal,
-                        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-                    });
-                    if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${await res.text()}`);
-                    hits = await res.json();
+                    const postAttempt = async (h: string): Promise<Hit[]> => {
+                        const postUrl = `${h}/search?${params.toString()}&query=${encodeURIComponent(q)}`;
+                        outChan?.appendLine(`[Roogle] POST fallback ${postUrl}`);
+                        const res = await fetch(postUrl, {
+                            method: 'POST',
+                            body: q,
+                            signal: tokenSrc.signal,
+                            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                        });
+                        if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${await res.text()}`);
+                        return res.json() as Promise<Hit[]>;
+                    };
+                    hits = await withPortRecovery(cfg, postAttempt);
+                    currentHost = cfg.get('host', currentHost);
                 } else {
                     throw getErr;
                 }
             }
             const safeHits = hits ?? [];
             outChan?.appendLine(`[Roogle] Hits: ${JSON.stringify(hits)}`);
-            const mapped = safeHits.map((h: any) => ({
+            const mapped = safeHits.map((h: Hit) => ({
                 label: h.signature || h.name || '',
                 description: (h.path || []).join('::'),
                 detail: '',
-                link: `https://doc.rust-lang.org/${h.link}`,
+                link: h.link,
                 alwaysShow: true as boolean,
             }));
             qp.items = mapped;
@@ -291,11 +361,12 @@ async function presentSearch(host: string, initialScope: string, query: string, 
                 .map(i => `${i.label} (${i.description})`)
                 .join(' | ');
             outChan?.appendLine(`[Roogle] First items: ${preview}`);
-        } catch (e: any) {
-            if (e.name !== 'AbortError') {
-                vscode.window.showErrorMessage(`Roogle error: ${e.message || e}`);
+        } catch (e: unknown) {
+            const abortName = (e && typeof e === 'object' && 'name' in e) ? String((e as { name?: unknown }).name) : '';
+            if (abortName !== 'AbortError') {
+                vscode.window.showErrorMessage(`Roogle error: ${errorMessage(e)}`);
                 qp.items = [{ label: 'Error fetching results', description: String(e) }];
-                outChan?.appendLine(`[Roogle] Error: ${e?.stack || e}`);
+                outChan?.appendLine(`[Roogle] Error: ${errorMessage(e)}`);
             }
         } finally {
             qp.busy = false;
@@ -311,7 +382,7 @@ async function presentSearch(host: string, initialScope: string, query: string, 
         handle = setTimeout(() => run(v), 300);
     });
     qp.onDidAccept(() => {
-        const picked = qp.selectedItems[0] as any;
+        const picked = qp.selectedItems[0] as { link?: string } | undefined;
         if (picked?.link) {
             outChan?.appendLine(`[Roogle] Opening docs: ${picked.link}`);
             vscode.env.openExternal(vscode.Uri.parse(picked.link));
@@ -323,7 +394,8 @@ async function presentSearch(host: string, initialScope: string, query: string, 
     qp.onDidTriggerButton(async () => {
         // Open scope picker
         try {
-            const scopes: string[] = await fetchJson(`${host}/scopes`);
+            const cfg = vscode.workspace.getConfiguration('roogle');
+            const scopes: string[] = await withPortRecovery(cfg, async (h) => fetchJson(`${h}/scopes`));
             const picked = await vscode.window.showQuickPick(scopes, {
                 title: 'Roogle Scope',
                 placeHolder: scope,
@@ -337,8 +409,8 @@ async function presentSearch(host: string, initialScope: string, query: string, 
                     handle = setTimeout(() => run(qp.value), 10);
                 }
             }
-        } catch (e: any) {
-            vscode.window.showErrorMessage(`Roogle error: ${e.message || e}`);
+        } catch (e: unknown) {
+            vscode.window.showErrorMessage(`Roogle error: ${errorMessage(e)}`);
         }
     });
     qp.onDidHide(() => qp.dispose());
@@ -352,15 +424,15 @@ function stopServer() {
         serverProc = undefined;
         outChan?.appendLine('[Roogle] Server stopped');
         return true;
-    } else {
-        outChan?.appendLine('[Roogle] No server process to stop');
-        return false;
     }
+    outChan?.appendLine('[Roogle] No server process to stop');
+    return false;
 }
 
 async function ensureServer(cfg: vscode.WorkspaceConfiguration): Promise<boolean> {
     const host: string = cfg.get('host', 'http://localhost:8000');
-    if (await isHealthy(host)) return true;
+    let effectiveHost = host;
+    if (await isHealthy(effectiveHost)) return true;
     const auto: boolean = cfg.get('autoStart', true);
     if (!auto) return false;
     const mode: string = cfg.get('serverMode', 'managed');
@@ -372,11 +444,15 @@ async function ensureServer(cfg: vscode.WorkspaceConfiguration): Promise<boolean
     const managedIndexUrl: string = cfg.get('managed.indexUrl', '');
 
     try {
+        // Common configuration for local modes (managed, cargo, binary)
+        const idx = indexDir || ensureUserRoogleIndexDir();
+        const portFile = path.join(getStoragePath(), 'port.json');
+        const commonSrvArgs: string[] = ['--host', '127.0.0.1', '--port', '0', '--port-file', portFile];
+        if (idx) { commonSrvArgs.push('--index', idx); }
+
         if (mode === 'managed') {
             const bin = await installManagedBinary(managedServerUrl);
-            const userIndexDir = ensureUserRoogleIndexDir();
-            const portFile = path.join(getStoragePath(), 'port.json');
-            const args: string[] = ['--host', '127.0.0.1', '--port', '0', '--port-file', portFile, '--index', userIndexDir];
+            const args: string[] = [...commonSrvArgs];
             serverProc = spawn(bin, args);
             outChan?.appendLine(`[Roogle] Starting managed server: ${bin} ${args.join(' ')}`);
             // Wait for port-file and update roogle.host
@@ -384,23 +460,38 @@ async function ensureServer(cfg: vscode.WorkspaceConfiguration): Promise<boolean
             if (url) {
                 await cfg.update('host', url, vscode.ConfigurationTarget.Global);
                 outChan?.appendLine(`[Roogle] Server URL set to ${url}`);
+                effectiveHost = url;
             } else {
                 outChan?.appendLine('[Roogle] Port file not found in time');
             }
         } else if (mode === 'cargo') {
-            const idx = indexDir || ensureUserRoogleIndexDir();
-            const args = ['run', '-p', 'roogle-server', '--bin', 'roogle-server', '--release'];
-            if (idx) args.push('--', '--index', idx);
-            const options: any = {};
+            const cargoArgs = ['run', '-p', 'roogle-server', '--bin', 'roogle-server', '--release', '--', ...commonSrvArgs];
+            const options: { cwd?: string } = {};
             if (repoRoot) options.cwd = repoRoot;
-            serverProc = spawn('cargo', args, options);
-            outChan?.appendLine(`[Roogle] Starting server: cargo ${args.join(' ')}`);
+            serverProc = spawn('cargo', cargoArgs, options);
+            outChan?.appendLine(`[Roogle] Starting server: cargo ${cargoArgs.join(' ')}`);
+            // Wait for port-file and update roogle.host
+            const url = await waitForPortFile(portFile, 10000);
+            if (url) {
+                await cfg.update('host', url, vscode.ConfigurationTarget.Global);
+                outChan?.appendLine(`[Roogle] Server URL set to ${url}`);
+                effectiveHost = url;
+            } else {
+                outChan?.appendLine('[Roogle] Port file not found in time');
+            }
         } else if (mode === 'binary' && cmdPath) {
-            const idx = indexDir || ensureUserRoogleIndexDir();
-            const args: string[] = [];
-            if (idx) { args.push('--index', idx); }
+            const args: string[] = [...commonSrvArgs];
             serverProc = spawn(cmdPath, args);
             outChan?.appendLine(`[Roogle] Starting server: ${cmdPath} ${args.join(' ')}`);
+            // Wait for port-file and update roogle.host
+            const url = await waitForPortFile(portFile, 10000);
+            if (url) {
+                await cfg.update('host', url, vscode.ConfigurationTarget.Global);
+                outChan?.appendLine(`[Roogle] Server URL set to ${url}`);
+                effectiveHost = url;
+            } else {
+                outChan?.appendLine('[Roogle] Port file not found in time');
+            }
         } else if (mode === 'docker') {
             const idx = indexDir || ensureUserRoogleIndexDir();
             const args = ['run', '--rm', '-p', `${port}:8000`];
@@ -409,8 +500,8 @@ async function ensureServer(cfg: vscode.WorkspaceConfiguration): Promise<boolean
             serverProc = spawn('docker', args);
             outChan?.appendLine(`[Roogle] Starting server: docker ${args.join(' ')}`);
         }
-    } catch (e: any) {
-        outChan?.appendLine(`[Roogle] Failed to start server: ${e?.message || e}`);
+    } catch (e: unknown) {
+        outChan?.appendLine(`[Roogle] Failed to start server: ${errorMessage(e)}`);
     }
 
     if (serverProc) {
@@ -419,7 +510,7 @@ async function ensureServer(cfg: vscode.WorkspaceConfiguration): Promise<boolean
     }
 
     for (let i = 0; i < 40; i++) {
-        if (await isHealthy(host)) {
+        if (await isHealthy(effectiveHost)) {
             outChan?.appendLine('[Roogle] Server is ready');
             return true;
         }
@@ -449,23 +540,23 @@ async function installManagedBinary(explicitUrl?: string): Promise<string> {
 
     await fs.promises.mkdir(binDir, { recursive: true });
     if (explicitUrl) {
-        await downloadFile(explicitUrl, binPath + '.download');
+        await downloadFile(explicitUrl, `${binPath}.download`);
     } else {
         const candidates = getServerCandidateUrls(platform, arch);
         let ok = false;
         for (const url of candidates) {
             try {
                 outChan?.appendLine(`[Roogle] Trying server download: ${url}`);
-                await downloadFile(url, binPath + '.download');
+                await downloadFile(url, `${binPath}.download`);
                 ok = true;
                 break;
-            } catch (e: any) {
-                outChan?.appendLine(`[Roogle] Download failed: ${e?.message || e}`);
+            } catch (e: unknown) {
+                outChan?.appendLine(`[Roogle] Download failed: ${errorMessage(e)}`);
             }
         }
         if (!ok) throw new Error('No suitable server binary found for this platform');
     }
-    await fs.promises.rename(binPath + '.download', binPath);
+    await fs.promises.rename(`${binPath}.download`, binPath);
     if (platform !== 'win32') await fs.promises.chmod(binPath, 0o755);
     return binPath;
 }
@@ -543,6 +634,47 @@ function ensureUserRoogleIndexDir(): string {
         outChan?.appendLine(`[Roogle] Failed to ensure ~/.roogle directory: ${e}`);
     }
     return base;
+}
+
+// Port recovery helpers
+function getPortFilePath(): string {
+    return path.join(getStoragePath(), 'port.json');
+}
+
+async function readPortFileNow(): Promise<string | undefined> {
+    try {
+        const data = await fs.promises.readFile(getPortFilePath(), 'utf8');
+        const json = JSON.parse(data);
+        if (json && typeof json.url === 'string' && json.url.startsWith('http')) {
+            return json.url;
+        }
+    } catch { }
+    return undefined;
+}
+
+async function checkPortFileAndUpdateHost(cfg: vscode.WorkspaceConfiguration): Promise<string | undefined> {
+    const url = await readPortFileNow();
+    if (!url) return undefined;
+    const current = cfg.get('host', 'http://localhost:8000');
+    if (url !== current) {
+        await cfg.update('host', url, vscode.ConfigurationTarget.Global);
+        outChan?.appendLine(`[Roogle] Host updated from port file: ${url}`);
+    }
+    return url;
+}
+
+async function withPortRecovery<T>(cfg: vscode.WorkspaceConfiguration, attempt: (host: string) => Promise<T>): Promise<T> {
+    const initial = cfg.get('host', 'http://localhost:8000');
+    try {
+        return await attempt(initial);
+    } catch (e) {
+        const updated = await checkPortFileAndUpdateHost(cfg);
+        const nextHost = updated || cfg.get('host', initial);
+        if (nextHost && nextHost !== initial) {
+            return attempt(nextHost);
+        }
+        throw e;
+    }
 }
 
 

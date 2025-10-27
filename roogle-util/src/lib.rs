@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use rustdoc_types::{Crate, Id, Item, ItemSummary};
-
 /// Perform a tree shaking to reduce the size of given `krate`.
 pub fn shake(krate: Crate) -> Crate {
     let Crate {

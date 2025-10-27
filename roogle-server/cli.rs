@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use anyhow::{anyhow, Result};
-use roogle_engine::{query::parse::parse_query, search::Hit, Index};
-use roogle_server::{generate_bin_index, make_index, make_scopes, shake_index, Scopes};
+use anyhow::Result;
+use roogle_engine::search::Hit;
+use roogle_engine::search::Scope;
+use roogle_server::{generate_bin_index, make_index, make_sets, perform_search, shake_index};
 
 use structopt::StructOpt;
-use tracing::{debug, info};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, StructOpt)]
@@ -35,8 +36,9 @@ struct Cli {
     #[structopt(long)]
     json: bool,
 
-    /// Query string; if omitted, read from stdin
-    query: Option<String>,
+    /// Query string
+    #[structopt(long)]
+    query: String,
 
     /// Ask to the server instead of local index
     /// This requires the `host` to be set properly.
@@ -52,48 +54,6 @@ struct Cli {
     /// This writes `.bin` files alongside the original `.json` files.
     #[structopt(long)]
     binary: bool,
-}
-
-fn perform_search(
-    index: Index,
-    scopes: Scopes,
-    query_str: &str,
-    scope_str: &str,
-    limit: Option<usize>,
-    threshold: Option<f32>,
-) -> anyhow::Result<Vec<Hit>> {
-    let scope = match scope_str.split(':').collect::<Vec<_>>().as_slice() {
-        ["set", set] => scopes
-            .sets
-            .get(*set)
-            .context(format!("set `{}` not found", set))?,
-        ["crate", krate] => scopes
-            .krates
-            .get(*krate)
-            .context(format!("krate `{}` not found", krate))?,
-        _ => Err(anyhow!("parsing scope `{}` failed", scope_str))?,
-    };
-    debug!(?scope);
-
-    let query = parse_query(query_str)
-        .ok()
-        .context(format!("parsing query `{}` failed", query_str))?
-        .1;
-    debug!(?query);
-
-    let limit = limit.unwrap_or(30);
-    let threshold = threshold.unwrap_or(0.4);
-
-    let hits = index
-        .search(&query, scope.clone(), threshold)
-        .with_context(|| format!("search with query `{:?}` failed", query))?;
-    let hits = hits
-        .into_iter()
-        .inspect(|hit| debug!(?hit.name, link = ?hit.link, path = ?hit.path, similarities = ?hit.similarities(), score = ?hit.similarities().score()))
-        .take(limit)
-        .collect::<Vec<_>>();
-
-    Ok(hits)
 }
 
 async fn ask_server(
@@ -130,22 +90,18 @@ async fn ask_server(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    println!("Roogle Client v{}", env!("CARGO_PKG_VERSION"));
     tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_file(true)
         .with_line_number(true)
         .without_time()
         .init();
+    println!("Logger initialized");
     let cli = Cli::from_args();
-    let query = match cli.query {
-        Some(q) => q,
-        None => {
-            use std::io::Read;
-            let mut buf = String::new();
-            std::io::stdin().read_to_string(&mut buf)?;
-            buf
-        }
-    };
+    println!("Arguments parsed: {:?}", cli);
+
+    println!("Searching for: {}", cli.query);
 
     let index_dir = cli
         .index
@@ -158,22 +114,29 @@ async fn main() -> Result<()> {
     }
 
     if cli.binary {
+        info!("generating binary index under {}", index_dir.display());
         generate_bin_index(&index_dir).context("failed to generate binary index")?;
         info!("binary index generated successfully");
         return Ok(());
     }
 
     let hits = if cli.server {
-        ask_server(&cli.host, &cli.scope, &query, cli.limit, cli.threshold).await?
+        ask_server(&cli.host, &cli.scope, &cli.query, cli.limit, cli.threshold).await?
     } else {
-        let index = make_index(&index_dir).expect("failed to build index");
+        let index = make_index(&index_dir).await.expect("failed to build index");
         tracing::info!("index built successfully");
-        let scopes = make_scopes(Path::new(&index_dir)).context("failed to make scopes")?;
-        tracing::info!("scopes created successfully");
+        let sets = make_sets(Path::new(&index_dir));
+        let krates = index
+            .crates
+            .keys()
+            .map(|k| (k.clone(), Scope::Crate(k.clone())))
+            .collect();
+        let scopes = roogle_server::Scopes { sets, krates };
+
         perform_search(
-            index,
-            scopes,
-            &query,
+            &index,
+            &scopes,
+            &cli.query,
             &cli.scope,
             Some(cli.limit),
             Some(cli.threshold),

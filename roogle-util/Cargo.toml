@@ -11,4 +11,6 @@ license = "MIT OR Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.100"
+guppy = "0.17.23"
 rustdoc-types = "0.5.0"

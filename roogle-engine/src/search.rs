@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    build_parent_index, reconstruct_path_for_local,
-    types::{self, GenericArgs},
+    reconstruct_path_for_local,
+    types::{self, CrateMetadata, GenericArgs},
     Parent,
 };
 use serde::{Deserialize, Serialize};
@@ -42,10 +42,10 @@ impl PartialOrd for Hit {
 #[derive(Error, Debug)]
 pub enum SearchError {
     #[error("crate `{0}` is not present in the index")]
-    CrateNotFound(String),
+    CrateNotFound(CrateMetadata),
 
     #[error("item with id `{0}` is not present in crate `{1}`")]
-    ItemNotFound(u32, String),
+    ItemNotFound(u32, CrateMetadata),
 }
 
 pub type Result<T> = std::result::Result<T, SearchError>;
@@ -54,22 +54,22 @@ pub type Result<T> = std::result::Result<T, SearchError>;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Scope {
     /// Represetns a single crate.
-    Crate(String),
+    Crate(CrateMetadata),
 
     /// Represents multiple crates.
     ///
     /// For example:
     /// - `rustc_ast`, `rustc_ast_lowering`, `rustc_passes` and `rustc_ast_pretty`
     /// - `std`, `core` and `alloc`
-    Set(String, Vec<String>),
+    Set(String, Vec<CrateMetadata>),
 }
 
 impl Scope {
     pub fn url(&self) -> String {
         match self {
-            Scope::Crate(name) => format!(
+            Scope::Crate(krate) => format!(
                 "https://raw.githubusercontent.com/alpaylan/roogle-index/main/crate/{}.bin",
-                name
+                krate
             ),
             Scope::Set(name, _) => format!(
                 "https://raw.githubusercontent.com/alpaylan/roogle-index/main/set/{}.json",
@@ -77,7 +77,7 @@ impl Scope {
             ),
         }
     }
-    pub fn flatten(self) -> Vec<String> {
+    pub fn flatten(self) -> Vec<CrateMetadata> {
         match self {
             Scope::Crate(krate) => vec![krate],
             Scope::Set(_, krates) => krates,
@@ -99,18 +99,26 @@ impl Index {
         let mut hits = vec![];
 
         let krates = scope.flatten();
-        for krate_name in krates {
+
+        for krate_metadata in krates {
             let krate = self
                 .crates
-                .get(&krate_name)
-                .ok_or_else(|| SearchError::CrateNotFound(krate_name.clone()))?;
-            let parents = build_parent_index(krate);
+                .get(&krate_metadata)
+                .ok_or_else(|| SearchError::CrateNotFound(krate_metadata.clone()))?;
+
+            let parents = self
+                .parents
+                .get(&krate_metadata)
+                .expect("parent for a crate SHOULD ALWAYS be in 'parents' index");
+
             for item in krate.index.values() {
+                tracing::trace!(?item);
                 match item.inner {
                     types::ItemEnum::Function(ref f) => {
-                        let path = Self::path_and_link(krate, &krate_name, item, None, &parents)?;
-                        Self::path_and_link(krate, &krate_name, item, None, &parents)?;
+                        let path = Self::path_and_link(krate, item, None, parents)?;
+                        tracing::trace!(?path);
                         let sims = self.compare(query, item, krate, None);
+                        tracing::trace!(?sims);
 
                         if sims.score() < threshold {
                             debug!(?item, ?path, ?sims, score = ?sims.score());
@@ -134,19 +142,14 @@ impl Index {
                             .iter()
                             .map(|id| {
                                 krate.index.get(id).ok_or_else(|| {
-                                    SearchError::ItemNotFound(id.0, krate_name.clone())
+                                    SearchError::ItemNotFound(id.0, krate_metadata.clone())
                                 })
                             })
                             .collect::<Result<Vec<_>>>()?;
                         for assoc_item in assoc_items {
                             if let types::ItemEnum::Function(ref m) = assoc_item.inner {
-                                let path = Self::path_and_link(
-                                    krate,
-                                    &krate_name,
-                                    assoc_item,
-                                    Some(impl_),
-                                    &parents,
-                                )?;
+                                let path =
+                                    Self::path_and_link(krate, assoc_item, Some(impl_), parents)?;
                                 let sims = self.compare(query, assoc_item, krate, Some(impl_));
 
                                 if sims.score() < threshold {
@@ -208,12 +211,13 @@ impl Index {
     /// `item` must be a function or a method, otherwise assertions will fail.
     fn path_and_link(
         krate: &types::Crate,
-        krate_name: &str,
         item: &types::Item,
         _impl_: Option<&types::Impl>,
         parents: &HashMap<types::Id, Parent>,
     ) -> Result<crate::Path> {
         assert!(matches!(item.inner, types::ItemEnum::Function(_)));
+
+        let kinfo = krate.crate_metadata();
 
         let get_path = |id: &types::Id| -> Result<crate::Path> {
             // if let Some(p) = krate.paths.get(id) {
@@ -224,74 +228,13 @@ impl Index {
             //     // };
             //     todo!()
             // }
-            if let Some(segs) = reconstruct_path_for_local(krate, krate_name, id, parents) {
+            if let Some(segs) = reconstruct_path_for_local(krate, id, parents) {
                 return Ok(segs);
             }
-            Err(SearchError::ItemNotFound(id.0, krate_name.to_owned()))
+            Err(SearchError::ItemNotFound(id.0, kinfo.to_owned()))
         };
 
-        // If `item` is a associated item, replace the last segment of the path for the link of the ADT
-        // it is binded to.
-
-        // if let Some(impl_) = impl_ {
-        //     let recv;
-        //     match (&impl_.for_, &impl_.trait_) {
-        //         (_, Some(ref t)) => {
-        //             let types::Path { path: name, id, .. } = t;
-        //             path = get_path(&id)?;
-        //             recv = format!("trait.{}.html", name);
-        //         }
-        //         (
-        //             Type::ResolvedPath(Path {
-        //                 path: name, ref id, ..
-        //             }),
-        //             _,
-        //         ) => {
-        //             path = get_path(id)?;
-        //             let summary = krate.paths.get(id).ok_or_else(|| {
-        //                 SearchError::ItemNotFound(id.0.clone(), krate_name.to_owned())
-        //             })?;
-        //             match summary.kind {
-        //                 types::ItemKind::Union => recv = format!("union.{}.html", name),
-        //                 types::ItemKind::Enum => recv = format!("enum.{}.html", name),
-        //                 types::ItemKind::Struct => recv = format!("struct.{}.html", name),
-        //                 // SAFETY: ADTs are either unions or enums or structs.
-        //                 _ => unreachable!(),
-        //             }
-        //         }
-        //         (Type::Primitive(ref prim), _) => {
-        //             path = vec![prim.clone()];
-        //             recv = format!("primitive.{}.html", prim);
-        //         }
-        //         (Type::Tuple(_), _) => {
-        //             path = vec!["tuple".to_owned()];
-        //             recv = "primitive.tuple.html".to_owned();
-        //         }
-        //         (Type::Slice(_), _) => {
-        //             path = vec!["slice".to_owned()];
-        //             recv = "primitive.slice.html".to_owned();
-        //         }
-        //         (Type::Array { .. }, _) => {
-        //             path = vec!["array".to_owned()];
-        //             recv = "primitive.array.html".to_owned();
-        //         }
-        //         (Type::RawPointer { .. }, _) => {
-        //             path = vec!["pointer".to_owned()];
-        //             recv = "primitive.pointer.html".to_owned();
-        //         }
-        //         (Type::BorrowedRef { .. }, _) => {
-        //             path = vec!["reference".to_owned()];
-        //             recv = "primitive.reference.html".to_owned();
-        //         }
-        //         _ => unreachable!(),
-        //     }
-        //     link = path.clone();
-        //     if let Some(l) = link.last_mut() {
-        //         *l = recv;
-        //     }
-        // } else {
         let path = get_path(&item.id)?;
-        // }
 
         Ok(path)
         // match item.inner {
@@ -388,7 +331,7 @@ mod tests {
         types::Crate {
             name: Some("test-crate".to_owned()),
             root: types::Id(0),
-            crate_version: Some("0.0.0".to_owned()),
+            crate_version: "0.0.0".to_owned(),
             includes_private: false,
             index: Default::default(),
             paths: Default::default(),
