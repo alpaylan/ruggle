@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-release:
-    name: Build and release roogle-server
+    name: Build and release ruggle-server
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -33,9 +33,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build roogle-server
+      - name: Build ruggle-server
         run: |
-          cargo build --release -p roogle-server
+          cargo build --release -p ruggle-server
 
       - name: Prepare package
         shell: bash
@@ -44,36 +44,36 @@ jobs:
           PKG_DIR=dist/${{ matrix.target }}
           mkdir -p "$PKG_DIR/index/crate"
           # Copy server binary
-          BIN_NAME=roogle-server${{ matrix.bin_ext }}
+          BIN_NAME=ruggle-server${{ matrix.bin_ext }}
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp target/release/roogle-server.exe "$PKG_DIR/$BIN_NAME"
+            cp target/release/ruggle-server.exe "$PKG_DIR/$BIN_NAME"
           else
-            cp target/release/roogle-server "$PKG_DIR/$BIN_NAME"
+            cp target/release/ruggle-server "$PKG_DIR/$BIN_NAME"
             chmod +x "$PKG_DIR/$BIN_NAME"
           fi
           # Bundle minimal index (std/core/alloc) if present
           for CRATE in std core alloc; do
-            if [ -f roogle-index/crate/${CRATE}.json ]; then
-              cp roogle-index/crate/${CRATE}.json "$PKG_DIR/index/crate/" || true
+            if [ -f ruggle-index/crate/${CRATE}.json ]; then
+              cp ruggle-index/crate/${CRATE}.json "$PKG_DIR/index/crate/" || true
             fi
           done
           # Create plain binary asset (for VSCode managed mode direct download)
           mkdir -p upload
-          cp "$PKG_DIR/$BIN_NAME" upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }}
+          cp "$PKG_DIR/$BIN_NAME" upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }}
           # Archive the full package
           if [ "${{ matrix.archive }}" = "tar.gz" ]; then
-            tar -C dist -czf upload/roogle-server-${{ matrix.target }}.tar.gz "${{ matrix.target }}"
-            shasum -a 256 upload/roogle-server-${{ matrix.target }}.tar.gz > upload/roogle-server-${{ matrix.target }}.tar.gz.sha256 || sha256sum upload/roogle-server-${{ matrix.target }}.tar.gz > upload/roogle-server-${{ matrix.target }}.tar.gz.sha256
+            tar -C dist -czf upload/ruggle-server-${{ matrix.target }}.tar.gz "${{ matrix.target }}"
+            shasum -a 256 upload/ruggle-server-${{ matrix.target }}.tar.gz > upload/ruggle-server-${{ matrix.target }}.tar.gz.sha256 || sha256sum upload/ruggle-server-${{ matrix.target }}.tar.gz > upload/ruggle-server-${{ matrix.target }}.tar.gz.sha256
           else
-            (cd dist && powershell -c "Compress-Archive -Path '${{ matrix.target }}/*' -DestinationPath '../upload/roogle-server-${{ matrix.target }}.zip' ")
-            certutil -hashfile upload/roogle-server-${{ matrix.target }}.zip SHA256 > upload/roogle-server-${{ matrix.target }}.zip.sha256 || true
+            (cd dist && powershell -c "Compress-Archive -Path '${{ matrix.target }}/*' -DestinationPath '../upload/ruggle-server-${{ matrix.target }}.zip' ")
+            certutil -hashfile upload/ruggle-server-${{ matrix.target }}.zip SHA256 > upload/ruggle-server-${{ matrix.target }}.zip.sha256 || true
           fi
           # Checksums for plain binary
-          if [ -f upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }} ]; then
+          if [ -f upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }} ]; then
             if [ "${{ runner.os }}" = "Windows" ]; then
-              certutil -hashfile upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }} SHA256 > upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }}.sha256 || true
+              certutil -hashfile upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }} SHA256 > upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }}.sha256 || true
             else
-              shasum -a 256 upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }} > upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }}.sha256 || sha256sum upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }} > upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }}.sha256
+              shasum -a 256 upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }} > upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }}.sha256 || sha256sum upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }} > upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }}.sha256
             fi
           fi
 
@@ -81,12 +81,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }}
-            upload/roogle-server-${{ matrix.target }}${{ matrix.bin_ext }}.sha256
-            upload/roogle-server-${{ matrix.target }}.tar.gz
-            upload/roogle-server-${{ matrix.target }}.tar.gz.sha256
-            upload/roogle-server-${{ matrix.target }}.zip
-            upload/roogle-server-${{ matrix.target }}.zip.sha256
+            upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }}
+            upload/ruggle-server-${{ matrix.target }}${{ matrix.bin_ext }}.sha256
+            upload/ruggle-server-${{ matrix.target }}.tar.gz
+            upload/ruggle-server-${{ matrix.target }}.tar.gz.sha256
+            upload/ruggle-server-${{ matrix.target }}.zip
+            upload/ruggle-server-${{ matrix.target }}.zip.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

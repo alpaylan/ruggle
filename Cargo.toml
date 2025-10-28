@@ -1,7 +1,3 @@
 [workspace]
 resolver = "2"
-members = [
-    "roogle-server",
-    "roogle-engine",
-    "roogle-util",
-]
+members = ["ruggle-server", "ruggle-engine", "ruggle-util"]

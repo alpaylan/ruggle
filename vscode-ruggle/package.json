@@ -1,8 +1,8 @@
 {
-    "name": "roogle",
-    "displayName": "Roogle",
-    "description": "Search Rust APIs with Roogle",
-    "version": "0.0.2",
+    "name": "ruggle",
+    "displayName": "Ruggle",
+    "description": "Search Rust APIs with Ruggle",
+    "version": "0.0.1",
     "publisher": "AlperenKeles",
     "license": "MIT",
     "engines": {
@@ -10,98 +10,98 @@
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/alpaylan/roogle"
+        "url": "https://github.com/alpaylan/ruggle"
     },
     "activationEvents": [
-        "onCommand:roogle.search",
-        "onCommand:roogle.searchSelection",
-        "onCommand:roogle.setHost",
-        "onCommand:roogle.showLogs",
-        "onCommand:roogle.setScope",
-        "onCommand:roogle.startServer",
-        "onCommand:roogle.stopServer",
-        "onCommand:roogle.updateIndex",
-        "onCommand:roogle.installLibstdIndex",
-        "onCommand:roogle.indexCurrentProject"
+        "onCommand:ruggle.search",
+        "onCommand:ruggle.searchSelection",
+        "onCommand:ruggle.setHost",
+        "onCommand:ruggle.showLogs",
+        "onCommand:ruggle.setScope",
+        "onCommand:ruggle.startServer",
+        "onCommand:ruggle.stopServer",
+        "onCommand:ruggle.updateIndex",
+        "onCommand:ruggle.installLibstdIndex",
+        "onCommand:ruggle.indexCurrentProject"
     ],
     "main": "out/extension.js",
     "contributes": {
         "commands": [
             {
-                "command": "roogle.search",
-                "title": "Roogle: Search APIs"
+                "command": "ruggle.search",
+                "title": "Ruggle: Search APIs"
             },
             {
-                "command": "roogle.searchSelection",
-                "title": "Roogle: Search Selection"
+                "command": "ruggle.searchSelection",
+                "title": "Ruggle: Search Selection"
             },
             {
-                "command": "roogle.setHost",
-                "title": "Roogle: Set Server Host"
+                "command": "ruggle.setHost",
+                "title": "Ruggle: Set Server Host"
             },
             {
-                "command": "roogle.showLogs",
-                "title": "Roogle: Show Logs"
+                "command": "ruggle.showLogs",
+                "title": "Ruggle: Show Logs"
             },
             {
-                "command": "roogle.setScope",
-                "title": "Roogle: Set Scope"
+                "command": "ruggle.setScope",
+                "title": "Ruggle: Set Scope"
             },
             {
-                "command": "roogle.startServer",
-                "title": "Roogle: Start Server"
+                "command": "ruggle.startServer",
+                "title": "Ruggle: Start Server"
             },
             {
-                "command": "roogle.stopServer",
-                "title": "Roogle: Stop Server"
+                "command": "ruggle.stopServer",
+                "title": "Ruggle: Stop Server"
             },
             {
-                "command": "roogle.updateIndex",
-                "title": "Roogle: Add/Update Crate in Index"
+                "command": "ruggle.updateIndex",
+                "title": "Ruggle: Add/Update Crate in Index"
             },
             {
-                "command": "roogle.installLibstdIndex",
-                "title": "Roogle: Install libstd/core/alloc Index"
+                "command": "ruggle.installLibstdIndex",
+                "title": "Ruggle: Install libstd/core/alloc Index"
             },
             {
-                "command": "roogle.listIndexed",
-                "title": "Roogle: List Indexed Crates"
+                "command": "ruggle.listIndexed",
+                "title": "Ruggle: List Indexed Crates"
             },
             {
-                "command": "roogle.indexCurrentProject",
-                "title": "Roogle: Index Current Project (Cargo.toml at workspace root)"
+                "command": "ruggle.indexCurrentProject",
+                "title": "Ruggle: Index Current Project (Cargo.toml at workspace root)"
             }
         ],
         "configuration": {
             "type": "object",
-            "title": "Roogle",
+            "title": "Ruggle",
             "properties": {
-                "roogle.host": {
+                "ruggle.host": {
                     "type": "string",
                     "default": "http://localhost:8000",
-                    "description": "Roogle server base URL"
+                    "description": "Ruggle server base URL"
                 },
-                "roogle.scope": {
+                "ruggle.scope": {
                     "type": "string",
                     "default": "set:libstd",
                     "description": "Default search scope"
                 },
-                "roogle.limit": {
+                "ruggle.limit": {
                     "type": "number",
                     "default": 30,
                     "description": "Max results"
                 },
-                "roogle.threshold": {
+                "ruggle.threshold": {
                     "type": "number",
                     "default": 0.4,
                     "description": "Threshold"
                 },
-                "roogle.autoStart": {
+                "ruggle.autoStart": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Automatically start local Roogle server if not reachable"
+                    "description": "Automatically start local Ruggle server if not reachable"
                 },
-                "roogle.serverMode": {
+                "ruggle.serverMode": {
                     "type": "string",
                     "enum": [
                         "managed",
@@ -112,32 +112,32 @@
                     "default": "managed",
                     "description": "How to start the local server when autoStart is enabled"
                 },
-                "roogle.serverCommand": {
+                "ruggle.serverCommand": {
                     "type": "string",
                     "default": "",
-                    "description": "Path to Roogle server binary (used when serverMode=binary)"
+                    "description": "Path to Ruggle server binary (used when serverMode=binary)"
                 },
-                "roogle.indexDir": {
+                "ruggle.indexDir": {
                     "type": "string",
                     "default": "",
-                    "description": "Path to roogle-index directory to pass as --index"
+                    "description": "Path to ruggle-index directory to pass as --index"
                 },
-                "roogle.port": {
+                "ruggle.port": {
                     "type": "number",
                     "default": 8000,
                     "description": "Port to expose when serverMode=docker"
                 },
-                "roogle.repoRoot": {
+                "ruggle.repoRoot": {
                     "type": "string",
                     "default": "",
-                    "description": "Working directory for cargo mode (path to Roogle repo root)"
+                    "description": "Working directory for cargo mode (path to Ruggle repo root)"
                 },
-                "roogle.managed.serverUrl": {
+                "ruggle.managed.serverUrl": {
                     "type": "string",
                     "default": "",
-                    "description": "Direct URL to roogle-server binary for your platform (managed mode)"
+                    "description": "Direct URL to ruggle-server binary for your platform (managed mode)"
                 },
-                "roogle.managed.indexUrl": {
+                "ruggle.managed.indexUrl": {
                     "type": "string",
                     "default": "",
                     "description": "URL to bundled std/core/alloc index archive (tar.gz or zip)"

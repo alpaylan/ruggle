@@ -1,13 +1,12 @@
 [package]
-name = "roogle-engine"
-version = "1.0.2"
-authors = ["Hirochika Matsumoto <git@hkmatsumoto.com>"]
+name = "ruggle-engine"
+version = "0.0.1"
+authors = ["Alperen Keles <akeles@umd.edu>"]
 edition = "2021"
-description = "A Rust API search engine"
-documentation = "https://docs.rs/roogle-engine"
+description = "Structural search for Rust"
+documentation = "https://docs.rs/ruggle-engine"
 readme = "../README.md"
-homepage = "https://roogle.hkmatsumoto.com"
-repository = "https://github.com/roogle-rs/roogle"
+repository = "https://github.com/alpaylan/ruggle"
 license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

@@ -4,14 +4,14 @@ use anyhow::{anyhow, Context, Result};
 use crates_io_api::AsyncClient;
 use guppy::{graph::PackageGraph, MetadataCommand};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
-use roogle_engine::{
+use ruggle_engine::{
     build_parent_index,
     query::parse::parse_query,
     search::{Hit, Scope},
     types::{self, Crate, CrateMetadata},
     Index, Parent,
 };
-use roogle_util::shake;
+use ruggle_util::shake;
 
 use serde::Deserialize as _;
 use std::io::Read;
@@ -333,7 +333,7 @@ pub fn make_sets(index_dir: &Path) -> HashMap<String, Scope> {
                     let path = entry.path();
                     let json = std::fs::read_to_string(&path)
                         .context(format!("failed to read `{:?}`", path))?;
-                    let set = path.file_stem().unwrap().to_str().unwrap().to_owned(); // SAFETY: files in `roogle-index` has a name.
+                    let set = path.file_stem().unwrap().to_str().unwrap().to_owned(); // SAFETY: files in `ruggle-index` has a name.
                     let krates = serde_json::from_str::<Vec<CrateMetadata>>(&json)
                         .context(format!("failed to deserialize set `{}`", &set))?;
 
@@ -405,11 +405,11 @@ pub async fn pull_crate_from_remote_index(
 ) -> Result<types::Crate> {
     info!("checking remote index for crate: {}", &krate_metadata.name);
     let bin_url = format!(
-        "https://raw.githubusercontent.com/alpaylan/roogle-index/main/crate/{}.bin",
+        "https://raw.githubusercontent.com/alpaylan/ruggle-index/main/crate/{}.bin",
         krate_metadata.name
     );
     let json_url = format!(
-        "https://raw.githubusercontent.com/alpaylan/roogle-index/main/crate/{}.json",
+        "https://raw.githubusercontent.com/alpaylan/ruggle-index/main/crate/{}.json",
         // "https://docs.rs/crate/{}/{}/json",
         krate_metadata.name,
         // krate_metadata.version // FIXME: Version-specific crates are not supported in the remote index yet
@@ -460,7 +460,7 @@ pub async fn pull_crate_from_remote_index(
 pub async fn pull_set_from_remote_index(set_name: &str) -> Result<Vec<CrateMetadata>> {
     info!("fetching set {} from remote index", set_name);
     let json_url = format!(
-        "https://raw.githubusercontent.com/alpaylan/roogle-index/main/set/{}.json",
+        "https://raw.githubusercontent.com/alpaylan/ruggle-index/main/set/{}.json",
         set_name
     );
 
@@ -565,7 +565,7 @@ async fn index_krate(krate: &crates_io_api::Crate) -> Result<types::Crate> {
 
 pub async fn build_crate_locally(metadata: &types::CrateMetadata) -> Result<types::Crate> {
     let client = AsyncClient::new(
-        "roogle (git@hkmatsumoto.com)",
+        "ruggle (akeles@umd.edu)",
         std::time::Duration::from_millis(1000),
     )?;
 
@@ -620,11 +620,11 @@ mod dependency_tests {
     fn test_gather_all_dependencies() {
         let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
-            .join("roogle-engine")
+            .join("ruggle-engine")
             .join("Cargo.toml");
         let deps = gather_all_dependencies(&manifest_path).unwrap();
         println!("dependencies: {:#?}", deps);
-        assert!(deps.iter().any(|d| d.name == "roogle-util"));
+        assert!(deps.iter().any(|d| d.name == "ruggle-util"));
     }
 }
 

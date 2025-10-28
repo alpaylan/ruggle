@@ -1,9 +1,9 @@
 [package]
-name = "roogle-server"
-version = "1.0.0"
-authors = ["Hirochika Matsumoto <git@hkmatsumoto.com>"]
+name = "ruggle-server"
+version = "0.0.1"
+authors = ["Alperen Keles <akeles@umd.edu>"]
 edition = "2021"
-description = "A Rust API search engine"
+description = "Structural search for Rust"
 license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -21,7 +21,10 @@ serde = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
 urlencoding = "2"
 rayon = "1.11.0"
 bincode = { version = "2.0.1", features = ["serde"] }
@@ -29,18 +32,18 @@ guppy = "0.17.23"
 ruzstd = "0.8.1"
 crates_io_api = "0.12.0"
 
-[dependencies.roogle-engine]
-path = "../roogle-engine"
-version = "1.0.2"
+[dependencies.ruggle-engine]
+path = "../ruggle-engine"
+version = "0.0.1"
 
-[dependencies.roogle-util]
-path = "../roogle-util"
-version = "0.1.0"
+[dependencies.ruggle-util]
+path = "../ruggle-util"
+version = "0.0.1"
 
 [[bin]]
-name = "roogle-server"
+name = "ruggle-server"
 path = "server.rs"
 
 [[bin]]
-name = "roogle-cli"
+name = "ruggle-cli"
 path = "cli.rs"

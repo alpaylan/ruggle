@@ -1187,8 +1187,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "roogle-engine"
-version = "1.0.2"
+name = "ruggle-engine"
+version = "0.0.1"
 dependencies = [
  "bincode",
  "levenshtein",
@@ -1201,8 +1201,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "roogle-server"
-version = "1.0.0"
+name = "ruggle-server"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1211,8 +1211,8 @@ dependencies = [
  "guppy",
  "rayon",
  "reqwest",
- "roogle-engine",
- "roogle-util",
+ "ruggle-engine",
+ "ruggle-util",
  "rustdoc-types 0.5.0",
  "ruzstd",
  "serde",
@@ -1228,8 +1228,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "roogle-util"
-version = "0.1.0"
+name = "ruggle-util"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "guppy",

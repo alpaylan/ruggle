@@ -68,11 +68,11 @@ impl Scope {
     pub fn url(&self) -> String {
         match self {
             Scope::Crate(krate) => format!(
-                "https://raw.githubusercontent.com/alpaylan/roogle-index/main/crate/{}.bin",
+                "https://raw.githubusercontent.com/alpaylan/ruggle-index/main/crate/{}.bin",
                 krate
             ),
             Scope::Set(name, _) => format!(
-                "https://raw.githubusercontent.com/alpaylan/roogle-index/main/set/{}.json",
+                "https://raw.githubusercontent.com/alpaylan/ruggle-index/main/set/{}.json",
                 name
             ),
         }

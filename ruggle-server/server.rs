@@ -12,9 +12,9 @@ use axum::{
     Json, Router,
 };
 
-use roogle_engine::search::{Hit, Scope};
-use roogle_engine::types::CrateMetadata;
-use roogle_server::{
+use ruggle_engine::search::{Hit, Scope};
+use ruggle_engine::types::CrateMetadata;
+use ruggle_server::{
     index_local_crate, make_index, make_sets, perform_search, pull_crate_from_remote_index,
     pull_set_from_remote_index, Scopes,
 };
@@ -27,8 +27,8 @@ use tower_http::{
     trace::TraceLayer,
 };
 
-use roogle_engine::Index;
-use roogle_engine::{build_parent_index, types};
+use ruggle_engine::Index;
+use ruggle_engine::{build_parent_index, types};
 
 const STATIC_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
 
@@ -138,7 +138,7 @@ async fn main() {
 
     let opt = Opt::from_args();
     let index_dir: PathBuf = opt.index.unwrap_or_else(|| {
-        PathBuf::from(home_dir().unwrap_or_else(|| PathBuf::from("."))).join(".roogle")
+        PathBuf::from(home_dir().unwrap_or_else(|| PathBuf::from("."))).join(".ruggle")
     });
     let index = make_index(&index_dir).await.expect("failed to build index");
     let sets = make_sets(Path::new(&index_dir));
@@ -147,7 +147,7 @@ async fn main() {
         .keys()
         .map(|k| (k.clone(), Scope::Crate(k.clone())))
         .collect();
-    let scopes = roogle_server::Scopes { sets, krates };
+    let scopes = ruggle_server::Scopes { sets, krates };
     let shutdown_notify = Arc::new(Notify::new());
     let state = Arc::new(RwLock::new(AppState {
         index,
@@ -259,7 +259,7 @@ struct IndexRequest {
 }
 
 /// Update the in-memory index by fetching one or more crate JSON/bin files.
-/// Example body: {"urls": ["https://raw.githubusercontent.com/alpaylan/roogle-index/main/crate/std.json"]}
+/// Example body: {"urls": ["https://raw.githubusercontent.com/alpaylan/ruggle-index/main/crate/std.json"]}
 async fn update_index(
     State(state): State<Arc<RwLock<AppState>>>,
     Json(req): Json<IndexRequest>,

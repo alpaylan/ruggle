@@ -31,22 +31,22 @@ The first time you run the extension, it will automatically download the server 
 Alternatively, you can download latest release of the server via:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alpaylan/roogle/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/alpaylan/ruggle/main/install.sh | bash
 ```
 
 The server is also available in crates.io:
 
 ```bash
-cargo install roogle-server
+cargo install ruggle-server
 ```
 
 Once you have the server, you can locally run it via:
 
 ```bash
-roogle-server --host 127.0.0.1 --port 8000
+ruggle-server --host 127.0.0.1 --port 8000
 ```
 
-By default the server looks for the index in `$HOME/.roogle` which you can override with `--index <path>`.
+By default the server looks for the index in `$HOME/.ruggle` which you can override with `--index <path>`.
 
 ## Roadmap
 
@@ -91,22 +91,22 @@ After starting the server, visit `http://localhost:8000/` for a simple search UI
 Build and run the CLI, you can both run an standalone search and request to an existing server:
 
 ```sh
-$ cargo run --bin roogle-cli -- --scope set:libstd --query "fn (Option<Result<T, E>>) -> Result<Option<T>, E>>"
+$ cargo run --bin ruggle-cli -- --scope set:libstd --query "fn (Option<Result<T, E>>) -> Result<Option<T>, E>>"
 ```
 
 When asking the server, you set `--host` for the server URL.
 
 ```sh
-$ cargo run --bin roogle-cli -- --host "http://127.0.0.1:58034" --scope crate:tracing:0.1.41 --query "fn (Option<Result<T, E>>) -> Result<Option<T>, E>>"
+$ cargo run --bin ruggle-cli -- --host "http://127.0.0.1:58034" --scope crate:tracing:0.1.41 --query "fn (Option<Result<T, E>>) -> Result<Option<T>, E>>"
 ```
 
 Flags: `--host` (default `http://localhost:8000`), `--scope`, `--limit`, `--threshold`, `--json`.
 
 ## VSCode Extension (local)
 
-The extension lives in `vscode-roogle/`.
+The extension lives in `vscode-ruggle/`.
 
-1. `cd vscode-roogle && npm package package &&  code --install-extension ./roogle-0.0.2.vsix`
-2. Command Palette: "Roogle: Search APIs"
+1. `cd vscode-ruggle && npm package package &&  code --install-extension ./ruggle-0.0.2.vsix`
+2. Command Palette: "ruggle: Search APIs"
 
-There are a variety of settings including: `roogle.host`, `roogle.scope`, `roogle.limit`, `roogle.threshold`, `roogle.server`.
+There are a variety of settings including: `ruggle.host`, `ruggle.scope`, `ruggle.limit`, `ruggle.threshold`, `ruggle.server`.

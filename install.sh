@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# install_roogle.sh — installs roogle-server v0.0.1
+# install.sh — installs ruggle-server v0.0.1
 set -euo pipefail
 
-REPO="alpaylan/roogle"
-# Allow pinning a specific version by setting ROOGLE_VERSION=v0.0.1
-if [ "${ROOGLE_VERSION-}" != "" ]; then
-  BASE_URL="https://github.com/${REPO}/releases/download/${ROOGLE_VERSION}"
+REPO="alpaylan/ruggle"
+# Allow pinning a specific version by setting RUGGLE_VERSION=v0.0.1
+if [ "${RUGGLE_VERSION-}" != "" ]; then
+  BASE_URL="https://github.com/${REPO}/releases/download/${RUGGLE_VERSION}"
 else
   BASE_URL="https://github.com/${REPO}/releases/latest/download"
 fi
@@ -35,13 +35,13 @@ case "$uname_m" in
 esac
 
 # Asset names from the v0.0.1 release
-# - macOS:    roogle-server-x86_64-apple-darwin (and .tar.gz variant)
-# - Linux:    roogle-server-x86_64-unknown-linux-gnu
-# - Windows:  roogle-server-x86_64-pc-windows-msvc.exe  :contentReference[oaicite:0]{index=0}
+# - macOS:    ruggle-server-x86_64-apple-darwin (and .tar.gz variant)
+# - Linux:    ruggle-server-x86_64-unknown-linux-gnu
+# - Windows:  ruggle-server-x86_64-pc-windows-msvc.exe  :contentReference[oaicite:0]{index=0}
 if [ "$os" = "pc-windows-msvc" ]; then
-  asset="roogle-server-${arch}-${os}.exe"
+  asset="ruggle-server-${arch}-${os}.exe"
 else
-  asset="roogle-server-${arch}-${os}"
+  asset="ruggle-server-${arch}-${os}"
 fi
 
 tmpdir="$(mktemp -d)"
@@ -66,7 +66,7 @@ fi
 dest="${INSTALL_DIR:-/usr/local/bin}"
 [ -w "$dest" ] || { dest="$HOME/.local/bin"; mkdir -p "$dest"; case ":$PATH:" in *":$dest:"*) ;; *) echo "Tip: add '$dest' to your PATH";; esac; }
 
-binname="${BIN_NAME:-roogle-server}"
+binname="${BIN_NAME:-ruggle-server}"
 install_path="$dest/$binname"
 [ "$os" = "pc-windows-msvc" ] && install_path="$dest/${binname}.exe"
 

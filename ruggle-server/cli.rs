@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 use anyhow::Result;
-use roogle_engine::search::Hit;
-use roogle_engine::search::Scope;
-use roogle_server::{generate_bin_index, make_index, make_sets, perform_search, shake_index};
+use ruggle_engine::search::Hit;
+use ruggle_engine::search::Scope;
+use ruggle_server::{generate_bin_index, make_index, make_sets, perform_search, shake_index};
 
 use structopt::StructOpt;
 use tracing::info;
@@ -12,12 +12,12 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, StructOpt)]
 struct Cli {
-    /// Roogle server base URL
+    /// ruggle server base URL
     #[structopt(long, default_value = "http://localhost:8000")]
     host: String,
 
-    /// Path to roogle-index directory
-    /// If omitted, use `../roogle-index` relative to this binary.
+    /// Path to ruggle-index directory
+    /// If omitted, use `../ruggle-index` relative to this binary.
     #[structopt(long, parse(from_os_str))]
     index: Option<PathBuf>,
     /// Scope string like set:libstd or crate:std
@@ -90,7 +90,7 @@ async fn ask_server(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("Roogle Client v{}", env!("CARGO_PKG_VERSION"));
+    println!("ruggle Client v{}", env!("CARGO_PKG_VERSION"));
     tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_file(true)
@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
 
     let index_dir = cli
         .index
-        .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../roogle-index")));
+        .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../ruggle-index")));
 
     if cli.shake {
         shake_index(&index_dir).context("failed to shake index")?;
@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
             .keys()
             .map(|k| (k.clone(), Scope::Crate(k.clone())))
             .collect();
-        let scopes = roogle_server::Scopes { sets, krates };
+        let scopes = ruggle_server::Scopes { sets, krates };
 
         perform_search(
             &index,

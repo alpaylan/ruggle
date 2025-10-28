@@ -68,31 +68,31 @@ function errorMessage(e: unknown): string {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    outChan = vscode.window.createOutputChannel('Roogle');
-    const searchCmd = vscode.commands.registerCommand('roogle.search', async () => {
-        const cfg = vscode.workspace.getConfiguration('roogle');
+    outChan = vscode.window.createOutputChannel('Ruggle');
+    const searchCmd = vscode.commands.registerCommand('ruggle.search', async () => {
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         // Ensure server is reachable or start it if configured
         const ok = await ensureServer(cfg);
         if (!ok) {
-            vscode.window.showErrorMessage('Roogle server is not reachable. Configure roogle.host or enable autoStart.');
+            vscode.window.showErrorMessage('Ruggle server is not reachable. Configure ruggle.host or enable autoStart.');
             return;
         }
         const host: string = cfg.get('host', 'http://localhost:8000');
         const scope: string = cfg.get('scope', 'set:libstd');
         const limit: number = cfg.get('limit', 30);
         const threshold: number = cfg.get('threshold', 0.4);
-        outChan?.appendLine(`[Roogle] Opening QuickPick (dynamic search) host=${host} scope=${scope}`);
+        outChan?.appendLine(`[Ruggle] Opening QuickPick (dynamic search) host=${host} scope=${scope}`);
         await presentSearch(host, scope, '', limit, threshold);
     });
 
-    const searchSelCmd = vscode.commands.registerCommand('roogle.searchSelection', async () => {
+    const searchSelCmd = vscode.commands.registerCommand('ruggle.searchSelection', async () => {
         const editor = vscode.window.activeTextEditor;
         const selected = editor?.document.getText(editor.selection).trim();
         if (!selected) {
             vscode.window.showInformationMessage('No selection to search');
             return;
         }
-        const cfg = vscode.workspace.getConfiguration('roogle');
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         const host: string = cfg.get('host', 'http://localhost:8000');
         const scope: string = cfg.get('scope', 'set:libstd');
         const limit: number = cfg.get('limit', 30);
@@ -100,54 +100,54 @@ export function activate(context: vscode.ExtensionContext) {
         await presentSearch(host, scope, selected, limit, threshold);
     });
 
-    const setHostCmd = vscode.commands.registerCommand('roogle.setHost', async () => {
-        const cfg = vscode.workspace.getConfiguration('roogle');
+    const setHostCmd = vscode.commands.registerCommand('ruggle.setHost', async () => {
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         const current: string = cfg.get('host', 'http://localhost:8000');
         const input = await vscode.window.showInputBox({
-            prompt: 'Roogle server host URL',
+            prompt: 'Ruggle server host URL',
             value: current,
         });
         if (input) {
             await cfg.update('host', input, vscode.ConfigurationTarget.Global);
-            vscode.window.showInformationMessage(`Roogle host set to ${input}`);
+            vscode.window.showInformationMessage(`Ruggle host set to ${input}`);
         }
     });
 
-    const setScopeCmd = vscode.commands.registerCommand('roogle.setScope', async () => {
-        const cfg = vscode.workspace.getConfiguration('roogle');
+    const setScopeCmd = vscode.commands.registerCommand('ruggle.setScope', async () => {
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         const current: string = cfg.get('scope', 'set:libstd');
         try {
             const scopes: string[] = await withPortRecovery(cfg, async (h) => fetchJson(`${h}/scopes`));
             const picked = await vscode.window.showQuickPick(scopes, {
-                title: 'Roogle: Set Scope',
+                title: 'Ruggle: Set Scope',
                 placeHolder: current,
             });
             if (picked) {
                 await cfg.update('scope', picked, vscode.ConfigurationTarget.Global);
-                vscode.window.showInformationMessage(`Roogle scope set to ${picked}`);
+                vscode.window.showInformationMessage(`Ruggle scope set to ${picked}`);
             }
         } catch (e: unknown) {
-            vscode.window.showErrorMessage(`Roogle error: ${errorMessage(e)}`);
+            vscode.window.showErrorMessage(`Ruggle error: ${errorMessage(e)}`);
         }
     });
 
-    const startServerCmd = vscode.commands.registerCommand('roogle.startServer', async () => {
-        const cfg = vscode.workspace.getConfiguration('roogle');
+    const startServerCmd = vscode.commands.registerCommand('ruggle.startServer', async () => {
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         const ok = await ensureServer(cfg);
-        vscode.window.showInformationMessage(ok ? 'Roogle server is running' : 'Failed to start Roogle server');
+        vscode.window.showInformationMessage(ok ? 'Ruggle server is running' : 'Failed to start Ruggle server');
     });
-    const stopServerCmd = vscode.commands.registerCommand('roogle.stopServer', async () => {
-        const cfg = vscode.workspace.getConfiguration('roogle');
+    const stopServerCmd = vscode.commands.registerCommand('ruggle.stopServer', async () => {
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         try {
             await withPortRecovery(cfg, async (h) => fetch(`${h}/stop`, { method: 'POST', signal: AbortSignal.timeout(1000) }));
-            outChan?.appendLine('[Roogle] Sent /stop');
+            outChan?.appendLine('[Ruggle] Sent /stop');
         } catch (e: unknown) {
-            outChan?.appendLine(`[Roogle] /stop failed: ${errorMessage(e)}`);
+            outChan?.appendLine(`[Ruggle] /stop failed: ${errorMessage(e)}`);
         }
     });
 
-    const updateIndexCmd = vscode.commands.registerCommand('roogle.updateIndex', async () => {
-        const cfg = vscode.workspace.getConfiguration('roogle');
+    const updateIndexCmd = vscode.commands.registerCommand('ruggle.updateIndex', async () => {
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         const input = await vscode.window.showInputBox({
             prompt: 'Enter crate:<name> or set:<name> (e.g., crate:std or set:libstd)',
             placeHolder: 'crate:std | set:libstd'
@@ -176,7 +176,7 @@ export function activate(context: vscode.ExtensionContext) {
             const scopes = { scopes: [scope] };
             const doPost = async (h: string) => {
                 const target = `${h}/index`;
-                outChan?.appendLine(`[Roogle] POST ${target} scopes=${JSON.stringify(scopes)}`);
+                outChan?.appendLine(`[Ruggle] POST ${target} scopes=${JSON.stringify(scopes)}`);
                 const res = await fetch(target, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -189,16 +189,16 @@ export function activate(context: vscode.ExtensionContext) {
             };
             const text = await withPortRecovery(cfg, doPost);
             vscode.window.showInformationMessage(`Index update: ${text}`);
-            outChan?.appendLine(`[Roogle] Index update response: ${text}`);
+            outChan?.appendLine(`[Ruggle] Index update response: ${text}`);
         } catch (e: unknown) {
             vscode.window.showErrorMessage(`Index update failed: ${errorMessage(e)}`);
-            outChan?.appendLine(`[Roogle] Index update failed: ${errorMessage(e)}`);
+            outChan?.appendLine(`[Ruggle] Index update failed: ${errorMessage(e)}`);
         }
     });
 
-    const installLibstdCmd = vscode.commands.registerCommand('roogle.installLibstdIndex', async () => {
-        const cfg = vscode.workspace.getConfiguration('roogle');
-        const base = 'https://raw.githubusercontent.com/alpaylan/roogle-index/main/crate';
+    const installLibstdCmd = vscode.commands.registerCommand('ruggle.installLibstdIndex', async () => {
+        const cfg = vscode.workspace.getConfiguration('ruggle');
+        const base = 'https://raw.githubusercontent.com/alpaylan/ruggle-index/main/crate';
         const names = ['std', 'core', 'alloc'];
         const urls = names.flatMap(n => [`${base}/${n}.bin`, `${base}/${n}.json`]);
         try {
@@ -215,19 +215,19 @@ export function activate(context: vscode.ExtensionContext) {
             };
             const text = await withPortRecovery(cfg, doPost);
             vscode.window.showInformationMessage(`Index update: ${text}`);
-            outChan?.appendLine(`[Roogle] Index install libstd response: ${text}`);
+            outChan?.appendLine(`[Ruggle] Index install libstd response: ${text}`);
         } catch (e: unknown) {
             vscode.window.showErrorMessage(`Index install failed: ${errorMessage(e)}`);
-            outChan?.appendLine(`[Roogle] Index install failed: ${errorMessage(e)}`);
+            outChan?.appendLine(`[Ruggle] Index install failed: ${errorMessage(e)}`);
         }
     });
 
-    const showLogsCmd = vscode.commands.registerCommand('roogle.showLogs', async () => {
+    const showLogsCmd = vscode.commands.registerCommand('ruggle.showLogs', async () => {
         outChan?.show(true);
-        outChan?.appendLine('[Roogle] Logs opened');
+        outChan?.appendLine('[Ruggle] Logs opened');
     });
 
-    const indexCurrentProjectCmd = vscode.commands.registerCommand('roogle.indexCurrentProject', async () => {
+    const indexCurrentProjectCmd = vscode.commands.registerCommand('ruggle.indexCurrentProject', async () => {
         const folders = vscode.workspace.workspaceFolders;
         if (!folders || folders.length === 0) {
             vscode.window.showInformationMessage('No workspace folder open');
@@ -239,11 +239,11 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.showInformationMessage('No Cargo.toml found at the workspace root');
             return;
         }
-        const cfg = vscode.workspace.getConfiguration('roogle');
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         try {
             const doPost = async (h: string) => {
                 const target = `${h}/index/local`;
-                outChan?.appendLine(`[Roogle] POST ${target} cargo_manifest_path=${manifest}`);
+                outChan?.appendLine(`[Ruggle] POST ${target} cargo_manifest_path=${manifest}`);
                 const res = await fetch(target, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -256,18 +256,18 @@ export function activate(context: vscode.ExtensionContext) {
             };
             const text = await withPortRecovery(cfg, doPost);
             vscode.window.showInformationMessage(`Local index: ${text}`);
-            outChan?.appendLine(`[Roogle] Local index response: ${text}`);
+            outChan?.appendLine(`[Ruggle] Local index response: ${text}`);
         } catch (e: unknown) {
             vscode.window.showErrorMessage(`Local index failed: ${errorMessage(e)}`);
-            outChan?.appendLine(`[Roogle] Local index failed: ${errorMessage(e)}`);
+            outChan?.appendLine(`[Ruggle] Local index failed: ${errorMessage(e)}`);
         }
     });
 
-    const listIndexedCmd = vscode.commands.registerCommand('roogle.listIndexed', async () => {
-        const cfg = vscode.workspace.getConfiguration('roogle');
+    const listIndexedCmd = vscode.commands.registerCommand('ruggle.listIndexed', async () => {
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         try {
             const names: CrateMetadata[] = await withPortRecovery(cfg, async (h) => fetchJson(`${h}/index`));
-            outChan?.appendLine(`[Roogle] Indexed crates: ${names.map(n => n.name).join(', ')}`);
+            outChan?.appendLine(`[Ruggle] Indexed crates: ${names.map(n => n.name).join(', ')}`);
             const picked = await vscode.window.showQuickPick(names.map(n => n.name), { title: 'Indexed Crates' });
             if (picked) { vscode.env.clipboard.writeText(picked); }
         } catch (e: unknown) {
@@ -285,7 +285,7 @@ async function presentSearch(host: string, initialScope: string, query: string, 
     qp.matchOnDescription = true;
     qp.matchOnDetail = true;
     qp.placeholder = 'Type to refine results…';
-    qp.title = 'Roogle Results';
+    qp.title = 'Ruggle Results';
     qp.value = query;
     let scope = initialScope;
     qp.buttons = [
@@ -300,9 +300,9 @@ async function presentSearch(host: string, initialScope: string, query: string, 
 
     async function run(q: string) {
         if (q.length < 2) { qp.items = []; return; }
-        const cfg = vscode.workspace.getConfiguration('roogle');
+        const cfg = vscode.workspace.getConfiguration('ruggle');
         let currentHost: string = cfg.get('host', host);
-        outChan?.appendLine(`[Roogle] run q='${q.slice(0, 120)}'… limit=${limit} threshold=${threshold} scope=${scope} host=${currentHost}`);
+        outChan?.appendLine(`[Ruggle] run q='${q.slice(0, 120)}'… limit=${limit} threshold=${threshold} scope=${scope} host=${currentHost}`);
         tokenSrc.abort();
         tokenSrc = new AbortController();
         const params = new URLSearchParams();
@@ -313,7 +313,7 @@ async function presentSearch(host: string, initialScope: string, query: string, 
         try {
             const getAttempt = async (h: string): Promise<Hit[]> => {
                 const getUrl = `${h}/search?${params.toString()}&query=${encodeURIComponent(q)}`;
-                outChan?.appendLine(`[Roogle] GET ${getUrl}`);
+                outChan?.appendLine(`[Ruggle] GET ${getUrl}`);
                 return fetchJson<Hit[]>(getUrl, tokenSrc.signal);
             };
             let hits: Hit[] | null = null;
@@ -322,11 +322,11 @@ async function presentSearch(host: string, initialScope: string, query: string, 
                 currentHost = cfg.get('host', currentHost);
             } catch (getErr: unknown) {
                 // Retry with POST body if GET fails (e.g., due to proxies or URL limits)
-                outChan?.appendLine(`[Roogle] GET failed: ${errorMessage(getErr)}`);
+                outChan?.appendLine(`[Ruggle] GET failed: ${errorMessage(getErr)}`);
                 if (typeof fetch !== 'undefined') {
                     const postAttempt = async (h: string): Promise<Hit[]> => {
                         const postUrl = `${h}/search?${params.toString()}&query=${encodeURIComponent(q)}`;
-                        outChan?.appendLine(`[Roogle] POST fallback ${postUrl}`);
+                        outChan?.appendLine(`[Ruggle] POST fallback ${postUrl}`);
                         const res = await fetch(postUrl, {
                             method: 'POST',
                             body: q,
@@ -343,7 +343,7 @@ async function presentSearch(host: string, initialScope: string, query: string, 
                 }
             }
             const safeHits = hits ?? [];
-            outChan?.appendLine(`[Roogle] Hits: ${JSON.stringify(hits)}`);
+            outChan?.appendLine(`[Ruggle] Hits: ${JSON.stringify(hits)}`);
             const mapped = safeHits.map((h: Hit) => ({
                 label: h.signature || h.name || '',
                 description: (h.path || []).join('::'),
@@ -355,18 +355,18 @@ async function presentSearch(host: string, initialScope: string, query: string, 
             if (mapped.length > 0) {
                 qp.activeItems = [mapped[0]];
             }
-            outChan?.appendLine(`[Roogle] Results: ${safeHits.length}`);
+            outChan?.appendLine(`[Ruggle] Results: ${safeHits.length}`);
             const preview = mapped
                 .slice(0, 5)
                 .map(i => `${i.label} (${i.description})`)
                 .join(' | ');
-            outChan?.appendLine(`[Roogle] First items: ${preview}`);
+            outChan?.appendLine(`[Ruggle] First items: ${preview}`);
         } catch (e: unknown) {
             const abortName = (e && typeof e === 'object' && 'name' in e) ? String((e as { name?: unknown }).name) : '';
             if (abortName !== 'AbortError') {
-                vscode.window.showErrorMessage(`Roogle error: ${errorMessage(e)}`);
+                vscode.window.showErrorMessage(`Ruggle error: ${errorMessage(e)}`);
                 qp.items = [{ label: 'Error fetching results', description: String(e) }];
-                outChan?.appendLine(`[Roogle] Error: ${errorMessage(e)}`);
+                outChan?.appendLine(`[Ruggle] Error: ${errorMessage(e)}`);
             }
         } finally {
             qp.busy = false;
@@ -384,7 +384,7 @@ async function presentSearch(host: string, initialScope: string, query: string, 
     qp.onDidAccept(() => {
         const picked = qp.selectedItems[0] as { link?: string } | undefined;
         if (picked?.link) {
-            outChan?.appendLine(`[Roogle] Opening docs: ${picked.link}`);
+            outChan?.appendLine(`[Ruggle] Opening docs: ${picked.link}`);
             vscode.env.openExternal(vscode.Uri.parse(picked.link));
         } else {
             vscode.window.showInformationMessage('No docs link available for this item');
@@ -394,15 +394,15 @@ async function presentSearch(host: string, initialScope: string, query: string, 
     qp.onDidTriggerButton(async () => {
         // Open scope picker
         try {
-            const cfg = vscode.workspace.getConfiguration('roogle');
+            const cfg = vscode.workspace.getConfiguration('ruggle');
             const scopes: string[] = await withPortRecovery(cfg, async (h) => fetchJson(`${h}/scopes`));
             const picked = await vscode.window.showQuickPick(scopes, {
-                title: 'Roogle Scope',
+                title: 'Ruggle Scope',
                 placeHolder: scope,
             });
             if (picked) {
                 scope = picked;
-                outChan?.appendLine(`[Roogle] Scope changed to ${scope}`);
+                outChan?.appendLine(`[Ruggle] Scope changed to ${scope}`);
                 if (qp.value.length >= 2) {
                     // re-run search immediately with new scope
                     if (handle) clearTimeout(handle);
@@ -410,7 +410,7 @@ async function presentSearch(host: string, initialScope: string, query: string, 
                 }
             }
         } catch (e: unknown) {
-            vscode.window.showErrorMessage(`Roogle error: ${errorMessage(e)}`);
+            vscode.window.showErrorMessage(`Ruggle error: ${errorMessage(e)}`);
         }
     });
     qp.onDidHide(() => qp.dispose());
@@ -422,10 +422,10 @@ function stopServer() {
     if (serverProc) {
         try { serverProc.kill('SIGTERM'); } catch { /* noop */ }
         serverProc = undefined;
-        outChan?.appendLine('[Roogle] Server stopped');
+        outChan?.appendLine('[Ruggle] Server stopped');
         return true;
     }
-    outChan?.appendLine('[Roogle] No server process to stop');
+    outChan?.appendLine('[Ruggle] No server process to stop');
     return false;
 }
 
@@ -445,7 +445,7 @@ async function ensureServer(cfg: vscode.WorkspaceConfiguration): Promise<boolean
 
     try {
         // Common configuration for local modes (managed, cargo, binary)
-        const idx = indexDir || ensureUserRoogleIndexDir();
+        const idx = indexDir || ensureUserRuggleIndexDir();
         const portFile = path.join(getStoragePath(), 'port.json');
         const commonSrvArgs: string[] = ['--host', '127.0.0.1', '--port', '0', '--port-file', portFile];
         if (idx) { commonSrvArgs.push('--index', idx); }
@@ -454,54 +454,58 @@ async function ensureServer(cfg: vscode.WorkspaceConfiguration): Promise<boolean
             const bin = await installManagedBinary(managedServerUrl);
             const args: string[] = [...commonSrvArgs];
             serverProc = spawn(bin, args);
-            outChan?.appendLine(`[Roogle] Starting managed server: ${bin} ${args.join(' ')}`);
-            // Wait for port-file and update roogle.host
+            outChan?.appendLine(`[Ruggle] Starting managed server: ${bin} ${args.join(' ')}`);
+            // Wait for port-file and update ruggle.host
             const url = await waitForPortFile(portFile, 10000);
             if (url) {
                 await cfg.update('host', url, vscode.ConfigurationTarget.Global);
-                outChan?.appendLine(`[Roogle] Server URL set to ${url}`);
+                outChan?.appendLine(`[Ruggle] Server URL set to ${url}`);
                 effectiveHost = url;
             } else {
-                outChan?.appendLine('[Roogle] Port file not found in time');
+                outChan?.appendLine('[Ruggle] Port file not found in time');
             }
         } else if (mode === 'cargo') {
-            const cargoArgs = ['run', '-p', 'roogle-server', '--bin', 'roogle-server', '--release', '--', ...commonSrvArgs];
+            const cargoArgs = ['run', '-p', 'ruggle-server', '--bin', 'ruggle-server', '--release', '--', ...commonSrvArgs];
             const options: { cwd?: string } = {};
             if (repoRoot) options.cwd = repoRoot;
+            outChan?.appendLine(`[Ruggle] Starting cargo server in ${options.cwd || process.cwd()}`);
+            outChan?.appendLine(`[Ruggle] Cargo args: ${cargoArgs.join(' ')}`);
+            outChan?.appendLine(`[Ruggle] Options: ${JSON.stringify(options)}`);
+
             serverProc = spawn('cargo', cargoArgs, options);
-            outChan?.appendLine(`[Roogle] Starting server: cargo ${cargoArgs.join(' ')}`);
-            // Wait for port-file and update roogle.host
+            outChan?.appendLine(`[Ruggle] Starting server: cargo ${cargoArgs.join(' ')}`);
+            // Wait for port-file and update ruggle.host
             const url = await waitForPortFile(portFile, 10000);
             if (url) {
                 await cfg.update('host', url, vscode.ConfigurationTarget.Global);
-                outChan?.appendLine(`[Roogle] Server URL set to ${url}`);
+                outChan?.appendLine(`[Ruggle] Server URL set to ${url}`);
                 effectiveHost = url;
             } else {
-                outChan?.appendLine('[Roogle] Port file not found in time');
+                outChan?.appendLine('[Ruggle] Port file not found in time');
             }
         } else if (mode === 'binary' && cmdPath) {
             const args: string[] = [...commonSrvArgs];
             serverProc = spawn(cmdPath, args);
-            outChan?.appendLine(`[Roogle] Starting server: ${cmdPath} ${args.join(' ')}`);
-            // Wait for port-file and update roogle.host
+            outChan?.appendLine(`[Ruggle] Starting server: ${cmdPath} ${args.join(' ')}`);
+            // Wait for port-file and update ruggle.host
             const url = await waitForPortFile(portFile, 10000);
             if (url) {
                 await cfg.update('host', url, vscode.ConfigurationTarget.Global);
-                outChan?.appendLine(`[Roogle] Server URL set to ${url}`);
+                outChan?.appendLine(`[Ruggle] Server URL set to ${url}`);
                 effectiveHost = url;
             } else {
-                outChan?.appendLine('[Roogle] Port file not found in time');
+                outChan?.appendLine('[Ruggle] Port file not found in time');
             }
         } else if (mode === 'docker') {
-            const idx = indexDir || ensureUserRoogleIndexDir();
+            const idx = indexDir || ensureUserRuggleIndexDir();
             const args = ['run', '--rm', '-p', `${port}:8000`];
-            if (idx) { args.push('-v', `${idx}:/roogle-index`); }
-            args.push('ghcr.io/your-org/roogle:latest');
+            if (idx) { args.push('-v', `${idx}:/ruggle-index`); }
+            args.push('ghcr.io/your-org/ruggle:latest');
             serverProc = spawn('docker', args);
-            outChan?.appendLine(`[Roogle] Starting server: docker ${args.join(' ')}`);
+            outChan?.appendLine(`[Ruggle] Starting server: docker ${args.join(' ')}`);
         }
     } catch (e: unknown) {
-        outChan?.appendLine(`[Roogle] Failed to start server: ${errorMessage(e)}`);
+        outChan?.appendLine(`[Ruggle] Failed to start server: ${errorMessage(e)}`);
     }
 
     if (serverProc) {
@@ -511,12 +515,12 @@ async function ensureServer(cfg: vscode.WorkspaceConfiguration): Promise<boolean
 
     for (let i = 0; i < 40; i++) {
         if (await isHealthy(effectiveHost)) {
-            outChan?.appendLine('[Roogle] Server is ready');
+            outChan?.appendLine('[Ruggle] Server is ready');
             return true;
         }
         await new Promise(r => setTimeout(r, 300));
     }
-    outChan?.appendLine('[Roogle] Server did not become ready in time');
+    outChan?.appendLine('[Ruggle] Server did not become ready in time');
     return false;
 }
 
@@ -534,7 +538,7 @@ async function installManagedBinary(explicitUrl?: string): Promise<string> {
     const binDir = path.join(storage, 'server');
     const platform = os.platform();
     const arch = os.arch();
-    const binName = platform === 'win32' ? 'roogle-server.exe' : 'roogle-server';
+    const binName = platform === 'win32' ? 'ruggle-server.exe' : 'ruggle-server';
     const binPath = path.join(binDir, binName);
     if (fs.existsSync(binPath)) return binPath;
 
@@ -546,12 +550,12 @@ async function installManagedBinary(explicitUrl?: string): Promise<string> {
         let ok = false;
         for (const url of candidates) {
             try {
-                outChan?.appendLine(`[Roogle] Trying server download: ${url}`);
+                outChan?.appendLine(`[Ruggle] Trying server download: ${url}`);
                 await downloadFile(url, `${binPath}.download`);
                 ok = true;
                 break;
             } catch (e: unknown) {
-                outChan?.appendLine(`[Roogle] Download failed: ${errorMessage(e)}`);
+                outChan?.appendLine(`[Ruggle] Download failed: ${errorMessage(e)}`);
             }
         }
         if (!ok) throw new Error('No suitable server binary found for this platform');
@@ -573,8 +577,8 @@ async function installManagedIndex(explicitUrl?: string): Promise<string | undef
 }
 
 function getStoragePath(): string {
-    const ext = vscode.extensions.getExtension('AlperenKeles.roogle');
-    const storage = ext?.extensionPath ? path.join(ext.extensionPath, '.roogle') : os.tmpdir();
+    const ext = vscode.extensions.getExtension('AlperenKeles.ruggle');
+    const storage = ext?.extensionPath ? path.join(ext.extensionPath, '.ruggle') : os.tmpdir();
     if (!fs.existsSync(storage)) fs.mkdirSync(storage, { recursive: true });
     return storage;
 }
@@ -588,20 +592,20 @@ async function downloadFile(url: string, dest: string): Promise<void> {
 }
 
 function getServerCandidateUrls(platform: NodeJS.Platform, arch: string): string[] {
-    const latest = 'https://github.com/alpaylan/roogle/releases/latest/download';
-    const v010 = 'https://github.com/alpaylan/roogle/releases/download/v0.1.0';
+    const latest = 'https://github.com/alpaylan/ruggle/releases/latest/download';
+    const v010 = 'https://github.com/alpaylan/ruggle/releases/download/v0.1.0';
     const names: string[] = [];
     if (platform === 'darwin') {
         // Prefer arm64 if added in future, then x86_64
         if (arch === 'arm64') {
-            names.push('roogle-server-aarch64-apple-darwin');
+            names.push('ruggle-server-aarch64-apple-darwin');
         }
-        names.push('roogle-server-x86_64-apple-darwin');
+        names.push('ruggle-server-x86_64-apple-darwin');
     } else if (platform === 'win32') {
-        names.push('roogle-server-x86_64-pc-windows-msvc.exe');
+        names.push('ruggle-server-x86_64-pc-windows-msvc.exe');
     } else {
         // linux default
-        names.push('roogle-server-x86_64-unknown-linux-gnu');
+        names.push('ruggle-server-x86_64-unknown-linux-gnu');
     }
     const latestUrls = names.map(n => `${latest}/${n}`);
     const versionedUrls = names.map(n => `${v010}/${n}`);
@@ -623,15 +627,15 @@ async function waitForPortFile(portFile: string, timeoutMs: number): Promise<str
     return undefined;
 }
 
-function ensureUserRoogleIndexDir(): string {
+function ensureUserRuggleIndexDir(): string {
     const home = os.homedir();
-    const base = path.join(home, '.roogle');
+    const base = path.join(home, '.ruggle');
     const crateDir = path.join(base, 'crate');
     try {
         if (!fs.existsSync(base)) fs.mkdirSync(base, { recursive: true });
         if (!fs.existsSync(crateDir)) fs.mkdirSync(crateDir, { recursive: true });
     } catch (e) {
-        outChan?.appendLine(`[Roogle] Failed to ensure ~/.roogle directory: ${e}`);
+        outChan?.appendLine(`[Ruggle] Failed to ensure ~/.ruggle directory: ${e}`);
     }
     return base;
 }
@@ -658,7 +662,7 @@ async function checkPortFileAndUpdateHost(cfg: vscode.WorkspaceConfiguration): P
     const current = cfg.get('host', 'http://localhost:8000');
     if (url !== current) {
         await cfg.update('host', url, vscode.ConfigurationTarget.Global);
-        outChan?.appendLine(`[Roogle] Host updated from port file: ${url}`);
+        outChan?.appendLine(`[Ruggle] Host updated from port file: ${url}`);
     }
     return url;
 }
