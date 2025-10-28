@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="icon.png" width="96" height="96" alt="Ruggle logo" />
+<img src="https://github.com/alpaylan/ruggle/raw/main/vscode-ruggle/icon.png" width="96" height="96" alt="Ruggle logo" />
 
 ## Ruggle — Rust API Search for VS Code
 
