@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write   # <= lets GITHUB_TOKEN create releases
+
+
 jobs:
   build-and-release:
     name: Build and release ruggle-server

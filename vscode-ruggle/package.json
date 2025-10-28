@@ -4,6 +4,11 @@
     "description": "Search Rust APIs with Ruggle",
     "version": "0.0.1",
     "publisher": "AlperenKeles",
+    "icon": "icon.png",
+    "galleryBanner": {
+        "color": "#0b0e14",
+        "theme": "dark"
+    },
     "license": "MIT",
     "engines": {
         "vscode": "^1.84.0"
