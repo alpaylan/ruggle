@@ -208,9 +208,13 @@ async fn main() {
 }
 
 async fn index_page() -> Result<Html<String>, (StatusCode, String)> {
-    let html = tokio::fs::read_to_string(format!("{}/index.html", STATIC_DIR))
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
+    let html = include_bytes!("./static/index.html");
+    let html = String::from_utf8(html.to_vec()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to load index page: {}", e),
+        )
+    })?;
     Ok(Html(html))
 }
 

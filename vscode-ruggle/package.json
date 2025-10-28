@@ -2,7 +2,7 @@
     "name": "ruggle",
     "displayName": "Ruggle",
     "description": "Search Rust APIs with Ruggle",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "publisher": "AlperenKeles",
     "icon": "icon.png",
     "galleryBanner": {
