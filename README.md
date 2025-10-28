@@ -1,13 +1,64 @@
-# Roogle
-Roogle is a Rust API search engine, which allows you to search functions by names and type signatures.
+# Ruggle
 
-## Progress
+Ruggle is a fork of [Roogle](https://github.com/roogle-rs/roogle), a Rust API search engine that allow for searching functions using type signatures over Rust codebases.
+
+The idea of API search for programming languages isn't novel, [Hoogle](https://wiki.haskell.org/index.php?title=Hoogle) has been around for more than 2 decades, Roogle itself is 4 years old,
+OCaml has [Sherlodoc](https://github.com/art-w/sherlodoc), Lean recently announced [Loogle!](https://loogle.lean-lang.org)...
+
+The vision for Ruggle is not to just to be yet another API search tool, but become the default mode of search when working on a Rust project, making structural search a first class citizen
+developer tooling. When searching in a codebase, it is rare that we are without context; however text search forces us to build a textual context when we already have access to much more structural
+information. The objective of Ruggle is to build this graph of structured information, and allow the user to query it as a better search engine.
+
+Roogle seems to be in public archival mode, that's why I've decided to publish Ruggle as a separate project. There are already some major changes to the project:
+
+1. Ruggle is available as a VSCode extension that automatically downloads and starts the Ruggle server
+2. Ruggle maintains its own vendored `rustdoc_types` for faster decoding using `bincode`
+3. Ruggle allows for automatically indexing and searching through the current Rust project
+
+These are some initial steps for the project, to be followed by better and faster search, better autocomplete in the search bar,
+a large index of available projects on [crates.io](https://crates.io), code actions for filling type holes in incomplete Rust programs,
+as well as more complex queries.
+
+## Installation
+
+Installation with VSCode is available in the extensions bar and the marketplace as well as through the CLI:
+
+```bash
+code --install-extension AlperenKeles.ruggle
+```
+
+The first time you run the extension, it will automatically download the server from the latest release.
+Alternatively, you can download latest release of the server via:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alpaylan/roogle/main/install.sh | bash
+```
+
+The server is also available in crates.io:
+
+```bash
+cargo install roogle-server
+```
+
+Once you have the server, you can locally run it via:
+
+```bash
+roogle-server --host 127.0.0.1 --port 8000
+```
+
+By default the server looks for the index in `$HOME/.roogle` which you can override with `--index <path>`.
+
+## Roadmap
 
 ### Available Queries
-- [x] Function queries
-- [x] Method queries
+
+- [x] Function queries: `fn <name>(<arg-name>: <type>, <arg-name>: <type>) -> <type>`
+- [ ] Multi-hop function queries: `(A -> ... -> C)`
+- [ ] Scoped queries: `<mod|struct|enum> <symbol>: <funtion-query>`,
+- [ ] Macro queries
 
 ### Available Types to Query
+
 - [x] Primitive types
 - [ ] Generic types
   - [x] Without bounds and where predicates (e.g., `<T>`)
@@ -18,56 +69,35 @@ Roogle is a Rust API search engine, which allows you to search functions by name
   - [x] With generic args (e.g., `Vec<T>`, `Option<T>`)
 - [ ] Other types
 
-## Example
-```sh
-$ cargo r --release
-# Then, open http://localhost:8000/ in your browser for the web UI
-# Or use the API directly:
-$ curl -G \
-      --data-urlencode "query=fn (Option<Result<T, E>>) -> Result<Option<T>, E>>" \
-      --data-urlencode "scope=set:libstd" \
-      --data-urlencode "limit=30" \
-      --data-urlencode "threshold=0.4" \
-      "http://localhost:8000/search"
-```
+### Realtime Search
 
-## Example with Docker
-```sh
-$ docker-compose up
-# Then, open http://localhost:8000/ in your browser for the web UI
-# Or use the API directly:
-$ curl -G \
-      --data-urlencode "query=fn (Option<Result<T, E>>) -> Result<Option<T>, E>>" \
-      --data-urlencode "scope=set:libstd" \
-      --data-urlencode "limit=30" \
-      --data-urlencode "threshold=0.4" \
-      "http://localhost:8000/search"
-```
-
-## Query Syntax
-
-- `fn f(type) -> type`
-- `fn (type) -> type`
-- `fn(type) -> type`
-- `(type) -> type`
-
-## Related Project
-- [cargo-roogle](https://github.com/roogle-rs/cargo-roogle)
+- [ ] Rust analyzer integration for realtime updates to the index for the current Rust project
+- [ ] Faster search with better search indexes, currently all search is O(N)
+- [ ] Better search heuristics, deprioritizing functions that are too loosely typed
+- [ ] Better search UX, autocomplete existing symbols
+- [ ] Code actions for filling typed holes, autocomplete suggestions based on the expected type vs the type of the cursor term
 
 ## Web UI
 
 After starting the server, visit `http://localhost:8000/` for a simple search UI. It lets you:
+
 - Choose a `scope` from `/scopes`
 - Enter a `query`
 - Adjust `limit` and `threshold`
-- See results with names, breadcrumb paths, and convenient doc links
+- See results with names, breadcrumb paths, convenient doc links
 
 ## CLI Client
 
-Build and run the CLI (server must be running):
+Build and run the CLI, you can both run an standalone search and request to an existing server:
 
 ```sh
-$ cargo run -p roogle --bin roogle-cli -- --scope set:libstd -- "fn (Option<Result<T, E>>) -> Result<Option<T>, E>>"
+$ cargo run --bin roogle-cli -- --scope set:libstd --query "fn (Option<Result<T, E>>) -> Result<Option<T>, E>>"
+```
+
+When asking the server, you set `--host` for the server URL.
+
+```sh
+$ cargo run --bin roogle-cli -- --host "http://127.0.0.1:58034" --scope crate:tracing:0.1.41 --query "fn (Option<Result<T, E>>) -> Result<Option<T>, E>>"
 ```
 
 Flags: `--host` (default `http://localhost:8000`), `--scope`, `--limit`, `--threshold`, `--json`.
@@ -76,8 +106,7 @@ Flags: `--host` (default `http://localhost:8000`), `--scope`, `--limit`, `--thre
 
 The extension lives in `vscode-roogle/`.
 
-1. `cd vscode-roogle && npm install && npm run compile`
-2. In VSCode, run "Extensions: Install from VSIX" (or launch with F5 in the extension host)
-3. Command Palette: "Roogle: Search APIs"
+1. `cd vscode-roogle && npm package package &&  code --install-extension ./roogle-0.0.2.vsix`
+2. Command Palette: "Roogle: Search APIs"
 
-Settings: `roogle.host`, `roogle.scope`, `roogle.limit`, `roogle.threshold`.
+There are a variety of settings including: `roogle.host`, `roogle.scope`, `roogle.limit`, `roogle.threshold`, `roogle.server`.

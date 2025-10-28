@@ -331,6 +331,163 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_parse_complex_type1() {
+        let input = "&mut [Option<i32>]";
+        let (_, ty) = parse_type::<nom::error::VerboseError<&str>>(input).unwrap();
+        assert_eq!(
+            ty,
+            Type::BorrowedRef {
+                mutable: true,
+                type_: Box::new(Type::Slice(Some(Box::new(Type::UnresolvedPath {
+                    name: "Option".to_string(),
+                    args: Some(Box::new(GenericArgs::AngleBracketed {
+                        args: vec![Some(GenericArg::Type(Type::Primitive(PrimitiveType::I32)))]
+                    }))
+                }))))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_complex_type2() {
+        let input = "*const (i32, &str, T)";
+        let (_, ty) = parse_type::<nom::error::VerboseError<&str>>(input).unwrap();
+        assert_eq!(
+            ty,
+            Type::RawPointer {
+                mutable: false,
+                type_: Box::new(Type::Tuple(vec![
+                    Some(Type::Primitive(PrimitiveType::I32)),
+                    Some(Type::BorrowedRef {
+                        mutable: false,
+                        type_: Box::new(Type::Primitive(PrimitiveType::Str)),
+                    }),
+                    Some(Type::Generic("T".to_string())),
+                ]))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_complex_type3() {
+        let input = "Result<_, E>";
+        let (_, ty) = parse_type::<nom::error::VerboseError<&str>>(input).unwrap();
+        assert_eq!(
+            ty,
+            Type::UnresolvedPath {
+                name: "Result".to_string(),
+                args: Some(Box::new(GenericArgs::AngleBracketed {
+                    args: vec![None, Some(GenericArg::Type(Type::Generic("E".to_string()))),]
+                }))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_function_decl() {
+        let input = "(x: i32, y: &str) -> bool";
+        let (_, decl) = parse_function_decl::<nom::error::VerboseError<&str>>(input).unwrap();
+        assert_eq!(
+            decl,
+            FnDecl {
+                inputs: Some(vec![
+                    Argument {
+                        name: Some("x".to_string()),
+                        ty: Some(Type::Primitive(PrimitiveType::I32)),
+                    },
+                    Argument {
+                        name: Some("y".to_string()),
+                        ty: Some(Type::BorrowedRef {
+                            mutable: false,
+                            type_: Box::new(Type::Primitive(PrimitiveType::Str)),
+                        }),
+                    },
+                ]),
+                output: Some(FnRetTy::Return(Type::Primitive(PrimitiveType::Bool))),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_function_decl_with_underscore() {
+        let input = "(_, y: &str) -> ()";
+        let (_, decl) = parse_function_decl::<nom::error::VerboseError<&str>>(input).unwrap();
+        assert_eq!(
+            decl,
+            FnDecl {
+                inputs: Some(vec![
+                    Argument {
+                        name: None,
+                        ty: None,
+                    },
+                    Argument {
+                        name: Some("y".to_string()),
+                        ty: Some(Type::BorrowedRef {
+                            mutable: false,
+                            type_: Box::new(Type::Primitive(PrimitiveType::Str)),
+                        }),
+                    },
+                ]),
+                output: Some(FnRetTy::DefaultReturn),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_complex_output_type() {
+        let input = "(x: i32) -> (i32, &str, T)";
+        let (_, decl) = parse_function_decl::<nom::error::VerboseError<&str>>(input).unwrap();
+        assert_eq!(
+            decl,
+            FnDecl {
+                inputs: Some(vec![Argument {
+                    name: Some("x".to_string()),
+                    ty: Some(Type::Primitive(PrimitiveType::I32)),
+                },]),
+                output: Some(FnRetTy::Return(Type::Tuple(vec![
+                    Some(Type::Primitive(PrimitiveType::I32)),
+                    Some(Type::BorrowedRef {
+                        mutable: false,
+                        type_: Box::new(Type::Primitive(PrimitiveType::Str)),
+                    }),
+                    Some(Type::Generic("T".to_string())),
+                ]))),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_complex_output_type2() {
+        let input = "fn abc() -> Result<Vec<i32>>";
+        let (_, decl) = parse_query(input).unwrap();
+        assert_eq!(
+            decl,
+            Query {
+                name: Some("abc".to_string()),
+                kind: Some(QueryKind::FunctionQuery(Function {
+                    decl: FnDecl {
+                        inputs: Some(vec![]),
+                        output: Some(FnRetTy::Return(Type::UnresolvedPath {
+                            name: "Result".to_string(),
+                            args: Some(Box::new(GenericArgs::AngleBracketed {
+                                args: vec![Some(GenericArg::Type(Type::UnresolvedPath {
+                                    name: "Vec".to_string(),
+                                    args: Some(Box::new(GenericArgs::AngleBracketed {
+                                        args: vec![Some(GenericArg::Type(Type::Primitive(
+                                            PrimitiveType::I32
+                                        )))]
+                                    }))
+                                }))]
+                            }))
+                        })),
+                    },
+                    qualifiers: HashSet::new(),
+                })),
+            }
+        );
+    }
+
+    #[test]
     fn test_parse_qualified_function() {
         let input = "pub async fn foo(bar: i32, _: &str) -> bool";
         let (_, query) = parse_query(input).unwrap();

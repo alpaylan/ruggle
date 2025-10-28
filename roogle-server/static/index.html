@@ -112,7 +112,7 @@
         path.textContent = (h.path || []).join('::');
         const link = document.createElement('div');
         const a = document.createElement('a');
-        a.href = 'https://doc.rust-lang.org/' + (h.link || []).join('/');
+        a.href = h.link;
         a.target = '_blank';
         a.rel = 'noreferrer noopener';
         a.textContent = 'Open docs';

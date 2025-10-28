@@ -1,3 +1,4 @@
+use std::env::home_dir;
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, fs, fs::File, sync::Arc};
 
@@ -136,9 +137,9 @@ async fn main() {
     init_logger();
 
     let opt = Opt::from_args();
-    let index_dir: PathBuf = opt
-        .index
-        .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../roogle-index")));
+    let index_dir: PathBuf = opt.index.unwrap_or_else(|| {
+        PathBuf::from(home_dir().unwrap_or_else(|| PathBuf::from("."))).join(".roogle")
+    });
     let index = make_index(&index_dir).await.expect("failed to build index");
     let sets = make_sets(Path::new(&index_dir));
     let krates = index
@@ -154,27 +155,6 @@ async fn main() {
         shutdown: shutdown_notify.clone(),
         index_dir: index_dir.clone(),
     }));
-    // By default add `set:libstd`
-    state.write().await.scopes.sets.insert(
-        "libstd".to_string(),
-        Scope::Set(
-            "libstd".to_string(),
-            vec![
-                CrateMetadata::new("std".to_string()),
-                CrateMetadata::new("core".to_string()),
-                CrateMetadata::new("alloc".to_string()),
-            ],
-        ),
-    );
-
-    state.write().await.scopes.krates.insert(
-        CrateMetadata::new("std".to_string()),
-        Scope::Crate(CrateMetadata::new("std".to_string())),
-    );
-    state.write().await.scopes.krates.insert(
-        CrateMetadata::new("core".to_string()),
-        Scope::Crate(CrateMetadata::new("core".to_string())),
-    );
 
     let cors = CorsLayer::new()
         .allow_origin(Any)

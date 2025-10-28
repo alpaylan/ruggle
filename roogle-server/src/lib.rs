@@ -30,21 +30,29 @@ pub fn perform_search(
     limit: Option<usize>,
     threshold: Option<f32>,
 ) -> anyhow::Result<Vec<Hit>> {
+    tracing::info!(
+        "performing search for query `{}` in scope `{}`",
+        query_str,
+        scope_str
+    );
+
+    tracing::debug!("available scopes: {:?}", scopes.sets.keys());
+    tracing::debug!("available crates: {:?}", scopes.krates.keys());
     let scope = match scope_str.split(':').collect::<Vec<_>>().as_slice() {
         ["set", set] => scopes
             .sets
             .get(*set)
             .context(format!("set `{}` not found", set))?,
-        ["crate", krate] => scopes
-            .krates
-            .get(&CrateMetadata::new(krate.to_string()))
-            .context(format!("krate `{}` not found", krate))?,
         ["crate", krate, version] => scopes
             .krates
             .get(&CrateMetadata {
                 name: krate.to_string(),
                 version: version.to_string(),
             })
+            .context(format!("krate `{}:{}` not found", krate, version))?,
+        ["crate", krate] => scopes
+            .krates
+            .get(&CrateMetadata::new(krate.to_string()))
             .context(format!("krate `{}` not found", krate))?,
 
         _ => Err(anyhow!("parsing scope `{}` failed", scope_str))?,
@@ -590,8 +598,9 @@ pub async fn index_local_crate(
             krates.push(krate);
         } else if let Ok(krate) = pull_crate_from_remote_index(krate_metadata).await {
             krates.push(krate);
-        } else if let Ok(krate) = pull_crate_from_docs_rs(krate_metadata).await {
-            krates.push(krate);
+        // FIXME: docs.rs is unreliable sometimes, and we also need to differentiate crates that have a different local version
+        // } else if let Ok(krate) = pull_crate_from_docs_rs(krate_metadata).await {
+        //     krates.push(krate);
         } else if let Ok(krate) = build_crate_locally(krate_metadata).await {
             krates.push(krate);
         } else {
