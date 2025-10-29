@@ -1,13 +1,18 @@
-use std::{collections::HashMap, env::temp_dir, io::BufReader, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    env::temp_dir,
+    io::BufReader,
+    path::Path,
+};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use crates_io_api::AsyncClient;
 use guppy::{graph::PackageGraph, MetadataCommand};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use ruggle_engine::{
     build_parent_index,
     query::parse::parse_query,
-    search::{Hit, Scope},
+    search::{Hit, Scope, Set},
     types::{self, Crate, CrateMetadata},
     Index, Parent,
 };
@@ -37,26 +42,9 @@ pub fn perform_search(
     );
 
     tracing::debug!("available scopes: {:?}", scopes.sets.keys());
-    tracing::debug!("available crates: {:?}", scopes.krates.keys());
-    let scope = match scope_str.split(':').collect::<Vec<_>>().as_slice() {
-        ["set", set] => scopes
-            .sets
-            .get(*set)
-            .context(format!("set `{}` not found", set))?,
-        ["crate", krate, version] => scopes
-            .krates
-            .get(&CrateMetadata {
-                name: krate.to_string(),
-                version: version.to_string(),
-            })
-            .context(format!("krate `{}:{}` not found", krate, version))?,
-        ["crate", krate] => scopes
-            .krates
-            .get(&CrateMetadata::new(krate.to_string()))
-            .context(format!("krate `{}` not found", krate))?,
-
-        _ => Err(anyhow!("parsing scope `{}` failed", scope_str))?,
-    };
+    tracing::debug!("available crates: {:?}", scopes.krates);
+    let scope =
+        Scope::try_from(scope_str).context(format!("parsing scope `{}` failed", scope_str))?;
     debug!(?scope);
 
     let query = parse_query(query_str)
@@ -67,9 +55,10 @@ pub fn perform_search(
 
     let limit = limit.unwrap_or(30);
     let threshold = threshold.unwrap_or(0.4);
+    let krates = scopes.get(&scope)?;
 
     let hits = index
-        .search(&query, scope.clone(), threshold)
+        .search(&query, &krates, threshold)
         .with_context(|| format!("search with query `{:?}` failed", query))?;
     let hits = hits
         .into_iter()
@@ -316,11 +305,28 @@ pub fn generate_bin_index(index_dir: &Path) -> Result<()> {
 }
 
 pub struct Scopes {
-    pub sets: HashMap<String, Scope>,
-    pub krates: HashMap<CrateMetadata, Scope>,
+    pub sets: HashMap<String, Set>,
+    pub krates: HashSet<CrateMetadata>,
 }
 
-pub fn make_sets(index_dir: &Path) -> HashMap<String, Scope> {
+impl Scopes {
+    pub fn get(&self, scope: &Scope) -> Result<Vec<CrateMetadata>> {
+        match scope {
+            Scope::Set(set) => self
+                .sets
+                .get(set)
+                .map(|s| s.crates.clone())
+                .with_context(|| format!("set `{}` not found", set)),
+            Scope::Crate(krate_metadata) => self
+                .krates
+                .get(krate_metadata)
+                .map(|s| vec![s.clone()])
+                .with_context(|| format!("crate `{}` not found", krate_metadata)),
+        }
+    }
+}
+
+pub fn make_sets(index_dir: &Path) -> HashMap<String, Set> {
     match std::fs::read_dir(format!("{}/set", index_dir.display())) {
         Err(e) => {
             warn!("registering sets skipped: {}", e);
@@ -337,7 +343,13 @@ pub fn make_sets(index_dir: &Path) -> HashMap<String, Scope> {
                     let krates = serde_json::from_str::<Vec<CrateMetadata>>(&json)
                         .context(format!("failed to deserialize set `{}`", &set))?;
 
-                    Ok((set.clone(), Scope::Set(set, krates)))
+                    Ok((
+                        set.clone(),
+                        Set {
+                            name: set,
+                            crates: krates,
+                        },
+                    ))
                 })
                 .filter_map(|res: Result<_, anyhow::Error>| {
                     if let Err(ref e) = res {
@@ -493,6 +505,7 @@ async fn index_krate(krate: &crates_io_api::Crate) -> Result<types::Crate> {
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open(path)
         .await
         .context("Could not create the temp tar.gz file")?;

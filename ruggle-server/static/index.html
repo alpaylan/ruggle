@@ -1,30 +1,205 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ruggle</title>
   <style>
-    :root { --bg: #0b0e14; --bg2: #11151c; --fg: #e6e1cf; --muted: #9da9b1; --accent: #82aaff; --accent2: #c3e88d; }
-    body { margin: 0; background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
-    header { padding: 16px 20px; background: var(--bg2); border-bottom: 1px solid #1f2430; position: sticky; top: 0; z-index: 10; }
-    header h1 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
-    main { max-width: 1100px; margin: 0 auto; padding: 20px; }
-    .controls { display: grid; grid-template-columns: 1fr 160px 140px 140px 120px; gap: 10px; align-items: center; }
-    .controls label { font-size: 12px; color: var(--muted); }
-    .controls input[type="text"], .controls select, .controls input[type="number"] { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a2f3a; background: #0f131a; color: var(--fg); }
-    .controls button { padding: 10px 14px; border-radius: 8px; border: 1px solid #2a2f3a; background: var(--accent); color: #0b0e14; font-weight: 700; cursor: pointer; }
-    .controls button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .hint { margin: 8px 0 16px; color: var(--muted); font-size: 12px; }
-    .results { margin-top: 16px; display: grid; gap: 12px; }
-    .card { padding: 12px 14px; border: 1px solid #222836; background: #0f131a; border-radius: 10px; }
-    .card .name { font-weight: 700; color: var(--accent2); }
-    .card .path { font-size: 12px; color: var(--muted); margin-top: 2px; }
-    .card a { color: var(--accent); text-decoration: none; }
-    .row { display: contents; }
-    .sr-only { position: absolute; left: -10000px; }
+    :root {
+      --bg: #0b0e14;
+      --bg2: #11151c;
+      --fg: #e6e1cf;
+      --muted: #9da9b1;
+      --accent: #82aaff;
+      --accent2: #c3e88d;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+
+    header {
+      padding: 16px 20px;
+      background: var(--bg2);
+      border-bottom: 1px solid #1f2430;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0.5px;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 160px 140px 140px 120px;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .controls label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .controls input[type="text"],
+    .controls select,
+    .controls input[type="number"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #2a2f3a;
+      background: #0f131a;
+      color: var(--fg);
+    }
+
+    .controls button {
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #2a2f3a;
+      background: var(--accent);
+      color: #0b0e14;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .controls button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .hint {
+      margin: 8px 0 16px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .results {
+      margin-top: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .card {
+      padding: 12px 14px;
+      border: 1px solid #222836;
+      background: #0f131a;
+      border-radius: 10px;
+    }
+
+    .card .name {
+      font-weight: 700;
+      color: var(--accent2);
+    }
+
+    .card .path {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .card a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    /* Function card split layout */
+    .fn-card {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    .fn-main {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .fn-sim {
+      flex: 0 0 380px;
+      text-align: right;
+      color: var(--muted);
+      resize: horizontal;
+      overflow: auto;
+      min-width: 260px;
+    }
+
+    @media (max-width: 900px) {
+      .fn-card {
+        flex-direction: column;
+      }
+
+      .fn-sim {
+        text-align: left;
+        flex: 0 0 auto;
+      }
+    }
+
+    .fn-actions {
+      margin-top: 6px;
+    }
+
+    .btn-link {
+      background: transparent;
+      color: var(--accent);
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    /* Logs rendering */
+    .logs {
+      max-height: 60vh;
+      min-height: 160px;
+      overflow: auto;
+      padding: 8px;
+      border: 1px solid #222836;
+      background: #0a0e15;
+      border-radius: 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.4;
+      color: var(--fg);
+      resize: vertical;
+    }
+
+    .logs .log-line {
+      border-bottom: 1px solid #1f2430;
+      padding: 2px 0;
+    }
+
+    .logs .log-line:last-child {
+      border-bottom: 0;
+    }
+
+    .row {
+      display: contents;
+    }
+
+    .sr-only {
+      position: absolute;
+      left: -10000px;
+    }
   </style>
 </head>
+
 <body>
   <header>
     <h1>Ruggle</h1>
@@ -53,6 +228,7 @@
       </div>
     </div>
     <div class="hint">Scopes are provided by <code>/scopes</code>. Results come from <code>/search</code>.</div>
+    <div id="functions" class="results"></div>
     <div id="results" class="results"></div>
   </main>
   <script>
@@ -62,6 +238,7 @@
     const thresholdEl = document.getElementById('threshold');
     const runBtn = document.getElementById('run');
     const resultsEl = document.getElementById('results');
+    const functionsEl = document.getElementById('functions');
     let currentController = null;
 
     function debounce(fn, wait) {
@@ -124,6 +301,397 @@
       }
     }
 
+    function getEnum(obj) {
+      if (!obj || typeof obj !== 'object') return { kind: undefined, value: undefined };
+      const keys = Object.keys(obj);
+      if (keys.length === 0) return { kind: undefined, value: undefined };
+      const kind = keys[0];
+      return { kind, value: obj[kind] };
+    }
+
+    function formatType(ty) {
+      const { kind, value } = getEnum(ty);
+      switch (kind) {
+        case 'primitive':
+          return value;
+        case 'generic':
+          return value;
+        case 'resolved_path':
+          return value?.path || '<path>';
+        case 'tuple':
+          return `(${(value || []).map(formatType).join(', ')})`;
+        case 'borrowed_ref': {
+          const lt = value?.lifetime ? `'${value.lifetime} ` : '';
+          const mut = value?.is_mutable ? 'mut ' : '';
+          return `&${lt}${mut}${formatType(value?.type)}`;
+        }
+        case 'raw_pointer':
+          return `*${value?.is_mutable ? 'mut' : 'const'} ${formatType(value?.type)}`;
+        case 'array':
+          return `[${formatType(value?.type)}; ${value?.len ?? '?'}]`;
+        case 'slice':
+          return `[${formatType(value?.type)}]`;
+        case 'function_pointer': {
+          const args = (value?.sig?.inputs || []).map(([n, t]) => `${n}: ${formatType(t)}`);
+          const ret = value?.sig?.output ? ` -> ${formatType(value.sig.output)}` : '';
+          return `fn(${args.join(', ')})${ret}`;
+        }
+        case 'qualified_path':
+          return `<qualified path>::${value?.name ?? ''}`;
+        case 'dyn_trait':
+          return 'dyn <trait>';
+        case 'impl_trait':
+          return 'impl <trait bounds>';
+        case 'infer':
+          return '_';
+        case 'pat':
+          return '<pattern type>';
+        default:
+          return kind || '<unknown type>';
+      }
+    }
+
+    function formatGenericBound(b) {
+      const { kind, value } = getEnum(b);
+      switch (kind) {
+        case 'trait_bound': {
+          const tr = value?.trait?.path || '<trait>';
+          const mod = value?.modifier === 'maybe' ? '?' : (value?.modifier === 'maybe_const' ? ' + const' : '');
+          return `${tr}${mod}`;
+        }
+        case 'outlives':
+          return value;
+        case 'use':
+          return `use<${(value || []).join(', ')}>`;
+        default:
+          return kind || '<bound>';
+      }
+    }
+
+    function formatGenericParam(p) {
+      const { kind, value } = getEnum(p?.kind);
+      if (!kind) return p?.name || '';
+      if (kind === 'lifetime') {
+        return `'$${p?.name || ''}`.replace("'$", "'");
+      }
+      if (kind === 'type') {
+        const bounds = (value?.bounds || []).map(formatGenericBound).join(' + ');
+        return bounds ? `${p?.name}: ${bounds}` : (p?.name || 'T');
+      }
+      if (kind === 'const') {
+        return `const ${p?.name}: ${formatType(value?.type)}`;
+      }
+      return p?.name || '';
+    }
+
+    function formatWherePredicate(w) {
+      const { kind, value } = getEnum(w);
+      if (kind === 'bound_predicate') {
+        const typeStr = formatType(value?.type);
+        const boundsStr = (value?.bounds || []).map(formatGenericBound).join(' + ');
+        const gens = (value?.generic_params || []).map(g => g?.name).filter(Boolean);
+        const forStr = gens.length ? `for<${gens.join(', ')}> ` : '';
+        return `${forStr}${typeStr}: ${boundsStr}`;
+      }
+      if (kind === 'lifetime_predicate') {
+        return `${value?.lifetime}: ${(value?.outlives || []).join(' + ')}`;
+      }
+      if (kind === 'eq_predicate') {
+        const lhs = formatType(value?.lhs);
+        const rhsEnum = getEnum(value?.rhs);
+        const rhs = rhsEnum.kind === 'type' ? formatType(rhsEnum.value) : (rhsEnum.kind === 'constant' ? (rhsEnum.value?.expr || '<const>') : '<term>');
+        return `${lhs} = ${rhs}`;
+      }
+      return '';
+    }
+
+    function formatAbi(abi) {
+      const { kind, value } = getEnum(abi);
+      if (!kind || kind === 'rust') return '';
+      if (kind === 'other') return `extern "${value}" `;
+      const name = kind.replace(/_/g, '').replace(/^(\w)/, (m) => m.toUpperCase());
+      const unwind = value?.unwind ? '-unwind' : '';
+      return `extern "${name}${unwind}" `;
+    }
+
+    function formatVisibility(v) {
+      const { kind, value } = getEnum(v);
+      if (!kind) return '';
+      if (kind === 'public') return 'pub';
+      if (kind === 'crate') return 'pub(crate)';
+      if (kind === 'default') return '';
+      if (kind === 'restricted') return `pub(in ${value?.path || '...'})`;
+      return kind;
+    }
+
+    function formatFunctionSignature(fn) {
+      const quals = [fn?.header?.is_const ? 'const' : '', fn?.header?.is_unsafe ? 'unsafe' : '', fn?.header?.is_async ? 'async' : '']
+        .filter(Boolean)
+        .join(' ');
+      const genParams = (fn?.generics?.params || []).map(formatGenericParam).filter(Boolean);
+      const genStr = genParams.length ? `<${genParams.join(', ')}>` : '';
+      const args = (fn?.sig?.inputs || []).map(([n, ty]) => `${n}: ${formatType(ty)}`);
+      const ret = fn?.sig?.output ? ` -> ${formatType(fn.sig.output)}` : '';
+      const wherePreds = (fn?.generics?.where_predicates || []).map(formatWherePredicate).filter(Boolean);
+      const whereStr = wherePreds.length ? ` where ${wherePreds.join(', ')}` : '';
+      const abiStr = formatAbi(fn?.header?.abi);
+      return `${abiStr}${quals ? quals + ' ' : ''}fn${genStr}(${args.join(', ')})${ret}${whereStr}`;
+    }
+
+    function formatSimilarity(sim) {
+      if (!sim) return '';
+      const parts = Array.isArray(sim.parts) ? sim.parts.map(p => {
+        if (p.discrete) return p.discrete;
+        if (typeof p.continuous === 'number') return p.continuous.toFixed(2);
+        return '?';
+      }) : [];
+      const score = (typeof sim.score === 'number') ? sim.score.toFixed(3) : '?';
+      return `similarity: score ${score} [${parts.join(', ')}]`;
+    }
+
+    function getItemId(it) {
+      if (!it || it.id == null) return null;
+      if (Array.isArray(it.id) && it.id.length > 1) return it.id[1];
+      return it.id;
+    }
+
+    function renderFunctions(items, simById = null, parsedQuery = null) {
+      functionsEl.innerHTML = '';
+      if (parsedQuery) {
+        const qhdr = document.createElement('div');
+        qhdr.className = 'card';
+        const title = document.createElement('div');
+        title.className = 'name';
+        title.textContent = 'Parsed Query';
+        const pre = document.createElement('pre');
+        pre.textContent = JSON.stringify(parsedQuery, null, 2);
+        qhdr.appendChild(title);
+        qhdr.appendChild(pre);
+        functionsEl.appendChild(qhdr);
+      }
+      if (!items || items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'card';
+        empty.textContent = 'No functions in scope';
+        functionsEl.appendChild(empty);
+        return;
+      }
+      for (const it of items) {
+        const card = document.createElement('div');
+        card.className = 'card fn-card';
+
+        const main = document.createElement('div');
+        main.className = 'fn-main';
+
+        const right = document.createElement('div');
+        right.className = 'fn-sim';
+
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = it.name || '(unnamed)';
+
+        const { kind, value } = getEnum(it.inner || {});
+        const vis = formatVisibility(it.visibility);
+        const sigLine = document.createElement('div');
+        sigLine.className = 'path';
+        if (kind === 'function') {
+          sigLine.textContent = `${vis ? vis + ' ' : ''}${formatFunctionSignature(value)}`;
+        } else {
+          sigLine.textContent = `[${kind || 'item'}]`;
+        }
+
+        const spanLine = document.createElement('div'); // path / location
+        spanLine.className = 'path';
+        if (it.span && it.span.filename) {
+          const begin = it.span.begin || [];
+          const end = it.span.end || [];
+          spanLine.textContent = `${it.span.filename} (${begin.join(':')} - ${end.join(':')})`;
+        } else {
+          spanLine.textContent = 'span: <unknown>';
+        }
+
+        // Always-visible core info
+        main.appendChild(name);
+        main.appendChild(sigLine);
+        main.appendChild(spanLine);
+
+        // Hidden extra details by default
+        const detailsWrap = document.createElement('div');
+        detailsWrap.style.display = 'none';
+
+        const docs = document.createElement('div');
+        docs.className = 'path';
+        if (it.docs) {
+          const text = String(it.docs);
+          const brief = text.length > 200 ? text.slice(0, 200) + '…' : text;
+          docs.textContent = brief;
+        } else {
+          docs.textContent = 'docs: <none>';
+        }
+
+        const metaId = document.createElement('div');
+        metaId.className = 'path';
+        metaId.textContent = `id: ${getItemId(it) ?? '?'}  •  crate_id: ${it.crate_id}`;
+
+        const bodyLine = document.createElement('div');
+        bodyLine.className = 'path';
+        if (kind === 'function') {
+          bodyLine.textContent = `body: ${value?.has_body ? 'yes' : 'no'}`;
+        }
+
+        const attrsLine = document.createElement('div');
+        attrsLine.className = 'path';
+        if (Array.isArray(it.attrs) && it.attrs.length) {
+          const names = it.attrs.map(a => Object.keys(a)[0]).join(', ');
+          attrsLine.textContent = `attributes: ${names}`;
+        } else {
+          attrsLine.textContent = 'attributes: <none>';
+        }
+
+        const deprecLine = document.createElement('div');
+        deprecLine.className = 'path';
+        if (it.deprecation) {
+          const since = it.deprecation.since ? `since ${it.deprecation.since}` : '';
+          const note = it.deprecation.note ? `: ${it.deprecation.note}` : '';
+          deprecLine.textContent = `deprecated ${since}${note}`.trim();
+        } else {
+          deprecLine.textContent = 'deprecated: no';
+        }
+
+        const linksLine = document.createElement('div');
+        linksLine.className = 'path';
+        linksLine.textContent = `intra links: ${it.links ? Object.keys(it.links).length : 0}`;
+
+        detailsWrap.appendChild(metaId);
+        detailsWrap.appendChild(bodyLine);
+        detailsWrap.appendChild(attrsLine);
+        detailsWrap.appendChild(deprecLine);
+        detailsWrap.appendChild(linksLine);
+        detailsWrap.appendChild(docs);
+
+        const actions = document.createElement('div');
+        actions.className = 'fn-actions';
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = 'btn-link';
+        toggleBtn.textContent = 'Show details';
+        toggleBtn.addEventListener('click', () => {
+          const shown = detailsWrap.style.display !== 'none';
+          detailsWrap.style.display = shown ? 'none' : 'block';
+          toggleBtn.textContent = shown ? 'Show details' : 'Hide details';
+        });
+        actions.appendChild(toggleBtn);
+
+        main.appendChild(actions);
+        main.appendChild(detailsWrap);
+
+        // Right side: similarity (when query present)
+        const qStr = queryEl.value.trim();
+        if (qStr.length > 0) {
+          const simLine = document.createElement('div');
+          simLine.className = 'path';
+          const sid = getItemId(it);
+          const sim = sid != null && simById ? simById.get(String(sid)) : null;
+          simLine.textContent = sim ? formatSimilarity(sim) : 'similarity: <error>';
+          right.appendChild(simLine);
+
+          // Logs button
+          const logsBtn = document.createElement('button');
+          logsBtn.className = 'btn-link';
+          logsBtn.textContent = 'View compare logs';
+          const logsWrap = document.createElement('details');
+          const logsSummary = document.createElement('summary');
+          logsSummary.textContent = 'Logs';
+          const logsBox = document.createElement('div');
+          logsBox.className = 'logs';
+          logsWrap.style.display = 'none';
+          logsWrap.appendChild(logsSummary);
+          logsWrap.appendChild(logsBox);
+          logsBtn.addEventListener('click', async () => {
+            try {
+              logsBtn.disabled = true;
+              logsBtn.textContent = 'Fetching logs…';
+              const p = new URLSearchParams();
+              p.set('scope', scopeEl.value || '');
+              p.set('query', qStr);
+              p.set('id', String(sid));
+              const r = await fetch('/debug/compare_logs?' + p.toString());
+              const data = await r.json();
+              const text = String(data.logs || '');
+              const lines = text.split('\n');
+              logsBox.innerHTML = '';
+              for (const line of lines) {
+                const div = document.createElement('div');
+                div.className = 'log-line';
+                div.textContent = line.length ? line : ' ';
+                logsBox.appendChild(div);
+              }
+              logsWrap.style.display = 'block';
+              logsWrap.open = true;
+              logsBtn.textContent = 'View compare logs';
+            } catch (e) {
+              logsBtn.textContent = 'Logs error';
+            } finally {
+              logsBtn.disabled = false;
+            }
+          });
+          right.appendChild(logsBtn);
+          right.appendChild(logsWrap);
+        }
+
+        card.appendChild(main);
+        if (right.childNodes.length) card.appendChild(right);
+        functionsEl.appendChild(card);
+      }
+    }
+
+    async function updateFunctions() {
+      // Get all functions in the selected scope from /debug
+      try {
+        const scope = scopeEl.value;
+        if (!scope) return;
+        const params = new URLSearchParams();
+        params.set('scope', scope);
+        const res = await fetch('/debug/functions?' + params.toString());
+        let functions = await res.json();
+        const q = queryEl.value.trim();
+        if (q.length > 0) {
+          // fetch parsed query for display
+          let parsed = null;
+          try {
+            const qres = await fetch('/debug/query?query=' + encodeURIComponent(q));
+            parsed = await qres.json();
+          } catch { }
+          // prefetch similarities, then sort by score asc
+          const entries = await Promise.allSettled(functions.map(async (it) => {
+            const id = getItemId(it);
+            if (id == null) throw new Error('no id');
+            const p = new URLSearchParams();
+            p.set('scope', scope);
+            p.set('query', q);
+            p.set('id', String(id));
+            const r = await fetch('/debug/similarity?' + p.toString());
+            const sim = await r.json();
+            return [String(id), sim];
+          }));
+          const simById = new Map(entries
+            .filter(e => e.status === 'fulfilled')
+            .map(e => e.value));
+          functions.sort((a, b) => {
+            const sa = simById.get(String(getItemId(a)))?.score;
+            const sb = simById.get(String(getItemId(b)))?.score;
+            if (typeof sa === 'number' && typeof sb === 'number') return sa - sb;
+            if (typeof sa === 'number') return -1;
+            if (typeof sb === 'number') return 1;
+            return 0;
+          });
+          renderFunctions(functions, simById, parsed);
+          return;
+        }
+        renderFunctions(functions, null, null);
+      } catch (e) {
+        console.error(e);
+      }
+    }
     async function runSearch() {
       const query = queryEl.value.trim();
       const scope = scopeEl.value;
@@ -159,14 +727,20 @@
     }
 
     const debouncedSearch = debounce(runSearch, 300);
+    const debouncedUpdateFunctions = debounce(updateFunctions, 300);
     runBtn.addEventListener('click', runSearch);
-    queryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
-    queryEl.addEventListener('input', debouncedSearch);
+    queryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { runSearch(); updateFunctions(); } });
+    queryEl.addEventListener('input', (e) => { debouncedSearch(); debouncedUpdateFunctions(); });
     scopeEl.addEventListener('change', () => {
+      updateFunctions();
       if (queryEl.value.trim().length >= 2) runSearch();
     });
 
-    loadScopes();
+    (async () => {
+      await loadScopes();
+      await updateFunctions();
+    })();
   </script>
 </body>
+
 </html>

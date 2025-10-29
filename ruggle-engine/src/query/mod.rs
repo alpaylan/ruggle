@@ -55,6 +55,14 @@ pub enum QueryKind {
     FunctionQuery(Function),
 }
 
+impl Display for QueryKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            QueryKind::FunctionQuery(func) => write!(f, "{}", func.decl),
+        }
+    }
+}
+
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, Hash, Serialize, Deserialize, PartialEq)]
 pub enum Qualifier {

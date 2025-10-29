@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use anyhow::Context as _;
 use anyhow::Result;
 use ruggle_engine::search::Hit;
-use ruggle_engine::search::Scope;
 use ruggle_server::{generate_bin_index, make_index, make_sets, perform_search, shake_index};
 
 use structopt::StructOpt;
@@ -126,11 +125,7 @@ async fn main() -> Result<()> {
         let index = make_index(&index_dir).await.expect("failed to build index");
         tracing::info!("index built successfully");
         let sets = make_sets(Path::new(&index_dir));
-        let krates = index
-            .crates
-            .keys()
-            .map(|k| (k.clone(), Scope::Crate(k.clone())))
-            .collect();
+        let krates = index.crates.keys().cloned().collect();
         let scopes = ruggle_server::Scopes { sets, krates };
 
         perform_search(

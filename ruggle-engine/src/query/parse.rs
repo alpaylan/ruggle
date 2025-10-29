@@ -64,7 +64,9 @@ where
     let (i, name) = opt(preceded(multispace1, parse_symbol))(i)?;
     let (i, mut decl) = opt(preceded(multispace0, parse_function))(i)?;
 
-    decl.as_mut().map(|d| d.qualifiers = qualifiers);
+    if let Some(d) = decl.as_mut() {
+        d.qualifiers = qualifiers;
+    }
 
     let query = Query {
         name,

@@ -88,7 +88,7 @@ pub trait Compare<Rhs> {
 }
 
 impl Compare<Item> for Query {
-    #[instrument(skip(krate))]
+    #[instrument(skip(self, krate, item), fields(query = %self, item = %item))]
     fn compare(
         &self,
         item: &Item,
@@ -133,7 +133,7 @@ impl Compare<String> for Symbol {
 }
 
 impl Compare<types::ItemEnum> for QueryKind {
-    #[instrument(skip(krate))]
+    #[instrument(skip(self, krate, kind), fields(query = %self, kind= %kind))]
     fn compare(
         &self,
         kind: &types::ItemEnum,
@@ -173,7 +173,7 @@ impl Compare<Qualifier> for Qualifier {
     }
 }
 impl Compare<types::Function> for Function {
-    #[instrument(skip(krate))]
+    #[instrument(skip(function, krate, generics, substs), fields(decl = %self.decl, qualifiers = ?self.qualifiers))]
     fn compare(
         &self,
         function: &types::Function,
@@ -215,7 +215,7 @@ impl Compare<types::Function> for Function {
 }
 
 impl Compare<types::FunctionSignature> for FnDecl {
-    #[instrument(skip(krate))]
+    #[instrument(skip(decl, krate, generics, substs), fields(decl = %self, sig = %decl))]
     fn compare(
         &self,
         decl: &types::FunctionSignature,
@@ -251,7 +251,7 @@ impl Compare<types::FunctionSignature> for FnDecl {
 }
 
 impl Compare<(String, types::Type)> for Argument {
-    #[instrument(skip(krate))]
+    #[instrument(skip(arg, krate, generics, substs), fields(arg_name = ?self.name, has_type = %self.ty.is_some()))]
     fn compare(
         &self,
         arg: &(String, types::Type),
@@ -276,7 +276,7 @@ impl Compare<(String, types::Type)> for Argument {
 }
 
 impl Compare<Option<types::Type>> for FnRetTy {
-    #[instrument(skip(krate))]
+    #[instrument(skip(ret_ty, krate, generics, substs), fields(expected = ?self))]
     fn compare(
         &self,
         ret_ty: &Option<types::Type>,
@@ -444,6 +444,7 @@ fn compare_type(
             let mut sims = q.compare(i, krate, generics, substs);
 
             match (q_args, i_args) {
+                #[allow(clippy::single_match)]
                 (Some(q), Some(i)) => match (&**q, &**i) {
                     (
                         GenericArgs::AngleBracketed { args: ref q },
@@ -484,7 +485,7 @@ fn compare_type(
 }
 
 impl Compare<types::Type> for Type {
-    #[instrument(skip(krate))]
+    #[instrument(skip(type_, krate, generics, substs), fields(qty = ?self))]
     fn compare(
         &self,
         type_: &types::Type,
@@ -497,7 +498,7 @@ impl Compare<types::Type> for Type {
 }
 
 impl Compare<types::Term> for Type {
-    #[instrument(skip(krate))]
+    #[instrument(skip(type_, krate, generics, substs), fields(qty = ?self))]
     fn compare(
         &self,
         type_: &types::Term,

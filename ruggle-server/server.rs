@@ -1,6 +1,11 @@
 use std::env::home_dir;
 use std::path::{Path, PathBuf};
-use std::{collections::HashMap, fs, fs::File, sync::Arc};
+use std::{
+    collections::HashMap,
+    fs,
+    fs::File,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Result;
 use axum::body::Bytes;
@@ -12,8 +17,8 @@ use axum::{
     Json, Router,
 };
 
-use ruggle_engine::search::{Hit, Scope};
-use ruggle_engine::types::CrateMetadata;
+use ruggle_engine::search::{Hit, Scope, Set};
+use ruggle_engine::types::{CrateMetadata, Item};
 use ruggle_server::{
     index_local_crate, make_index, make_sets, perform_search, pull_crate_from_remote_index,
     pull_set_from_remote_index, Scopes,
@@ -27,8 +32,11 @@ use tower_http::{
     trace::TraceLayer,
 };
 
-use ruggle_engine::Index;
+use ruggle_engine::compare::{Similarities, Similarity};
+use ruggle_engine::query::parse::parse_query;
 use ruggle_engine::{build_parent_index, types};
+use ruggle_engine::{query, Index};
+use tracing_subscriber as ts;
 
 const STATIC_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
 
@@ -113,7 +121,7 @@ async fn scopes_handler(State(state): State<Arc<RwLock<AppState>>>) -> Json<Vec<
     for set in state.scopes.sets.keys() {
         result.push(format!("set:{}", set));
     }
-    for krate in state.scopes.krates.keys() {
+    for krate in state.scopes.krates.iter() {
         result.push(format!("crate:{}", krate));
     }
     Json(result)
@@ -138,16 +146,14 @@ async fn main() {
 
     let opt = Opt::from_args();
     let index_dir: PathBuf = opt.index.unwrap_or_else(|| {
-        PathBuf::from(home_dir().unwrap_or_else(|| PathBuf::from("."))).join(".ruggle")
+        home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".ruggle")
     });
     let index = make_index(&index_dir).await.expect("failed to build index");
     let sets = make_sets(Path::new(&index_dir));
-    let krates = index
-        .crates
-        .keys()
-        .map(|k| (k.clone(), Scope::Crate(k.clone())))
-        .collect();
-    let scopes = ruggle_server::Scopes { sets, krates };
+    let krates = index.crates.keys().cloned().collect();
+    let scopes = Scopes { sets, krates };
     let shutdown_notify = Arc::new(Notify::new());
     let state = Arc::new(RwLock::new(AppState {
         index,
@@ -171,6 +177,10 @@ async fn main() {
         .route("/healthz", get(healthz))
         .route("/stop", post(stop))
         .route("/scopes", get(scopes_handler))
+        .route("/debug/functions", get(debug_functions_handler))
+        .route("/debug/similarity", get(debug_similarity_handler))
+        .route("/debug/query", get(debug_query_handler))
+        .route("/debug/compare_logs", get(debug_compare_logs_handler))
         .route("/", get(index_page))
         .nest_service("/static", static_service)
         .with_state(state)
@@ -277,7 +287,7 @@ async fn update_index(
     for scope in req.scopes {
         let krates = match scope {
             Scope::Crate(krate) => vec![krate],
-            Scope::Set(scope, _) => {
+            Scope::Set(scope) => {
                 let krates = pull_set_from_remote_index(&scope).await.map_err(|e| {
                     tracing::error!("pulling set `{}` failed: {}", scope, e);
                     StatusCode::BAD_GATEWAY
@@ -288,7 +298,7 @@ async fn update_index(
                         .await
                         .scopes
                         .sets
-                        .insert(scope.clone(), Scope::Set(scope, krates.clone()));
+                        .insert(scope.clone(), Set::new(scope, krates.clone()));
                 }
                 krates
             }
@@ -345,10 +355,7 @@ async fn update_index(
                 let mut state_write = state.write().await;
                 state_write.index.crates.insert(metadata.clone(), krate);
                 state_write.index.parents.insert(metadata.clone(), parents);
-                state_write
-                    .scopes
-                    .krates
-                    .insert(metadata.clone(), Scope::Crate(metadata));
+                state_write.scopes.krates.insert(metadata);
             }
             updated += 1;
         }
@@ -453,10 +460,7 @@ async fn update_local_index(
                 .expect("crates index SHOULD BE in sync with the parents index"),
         );
         // Register individual crate scopes for convenience
-        state
-            .scopes
-            .krates
-            .insert(metadata.clone(), Scope::Crate(metadata.clone()));
+        state.scopes.krates.insert(metadata.clone());
         metadatas_for_set.push(metadata);
     }
 
@@ -471,7 +475,7 @@ async fn update_local_index(
 
     state.scopes.sets.insert(
         set_name.clone(),
-        Scope::Set(set_name.clone(), metadatas_for_set.clone()),
+        Set::new(set_name.clone(), metadatas_for_set.clone()),
     );
 
     // Persist the set so it shows up on restart as well
@@ -496,4 +500,298 @@ async fn update_local_index(
         state.index.crates.len(),
         set_name
     )))
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugFunctionParams {
+    scope: String,
+}
+
+async fn debug_functions_handler(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Query(params): Query<DebugFunctionParams>,
+) -> Result<Json<Vec<Item>>, (StatusCode, String)> {
+    let scope = Scope::try_from(params.scope.as_str()).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("parsing scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+    let state = state.read().await;
+    let krates = state.scopes.get(&scope).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("resolving scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+
+    let mut results = vec![];
+    for krate in krates {
+        let krate = state.index.crates.get(&krate).ok_or((
+            StatusCode::BAD_REQUEST,
+            format!("crate `{}` not found in index", krate),
+        ))?;
+        results.extend(
+            krate
+                .index
+                .iter()
+                .filter(|(_, item)| matches!(item.inner, types::ItemEnum::Function(_)))
+                .map(|(_, item)| item)
+                .cloned(),
+        );
+    }
+    Ok(Json(results))
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugQueryParams {
+    query: String,
+}
+
+async fn debug_query_handler(
+    Query(params): Query<DebugQueryParams>,
+) -> Result<Json<ruggle_engine::query::Query>, (StatusCode, String)> {
+    let parsed = parse_query(params.query.as_str())
+        .map(|(_, q)| q)
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("parsing query `{}` failed", params.query),
+            )
+        })?;
+    Ok(Json(parsed))
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugSimilarityParams {
+    scope: String,
+    query: String,
+    id: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct PartJson {
+    discrete: Option<&'static str>,
+    continuous: Option<f32>,
+}
+
+#[derive(Debug, Serialize)]
+struct SimilarityJson {
+    score: f32,
+    parts: Vec<PartJson>,
+}
+
+async fn debug_similarity_handler(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Query(params): Query<DebugSimilarityParams>,
+) -> Result<Json<SimilarityJson>, (StatusCode, String)> {
+    let scope = Scope::try_from(params.scope.as_str()).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("parsing scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+    let query = parse_query(params.query.as_str())
+        .ok()
+        .map(|(_, q)| q)
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            format!("parsing query `{}` failed", params.query),
+        ))?;
+
+    use std::collections::HashMap as StdHashMap;
+    let state = state.read().await;
+    let krates = state.scopes.get(&scope).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("resolving scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+
+    // Find the item by id in the given scope's crates.
+    let mut found: Option<(types::Item, &types::Crate)> = None;
+    for km in &krates {
+        if let Some(krate) = state.index.crates.get(km) {
+            if let Some(item) = krate.index.get(&types::Id(params.id)) {
+                found = Some((item.clone(), krate));
+                break;
+            }
+        }
+    }
+
+    let (item, krate) = found.ok_or((
+        StatusCode::NOT_FOUND,
+        format!(
+            "item with id {} not found in scope {}",
+            params.id, params.scope
+        ),
+    ))?;
+
+    let mut generics = types::Generics::default();
+    let mut substs: StdHashMap<String, query::Type> = StdHashMap::new();
+    let sims_vec =
+        ruggle_engine::compare::Compare::compare(&query, &item, krate, &mut generics, &mut substs);
+    let sims = Similarities(sims_vec.clone());
+    let score = sims.score();
+    let parts = sims_vec
+        .into_iter()
+        .map(|s| match s {
+            Similarity::Discrete(d) => {
+                let label: &'static str = match d {
+                    ruggle_engine::compare::DiscreteSimilarity::Equivalent => "equivalent",
+                    ruggle_engine::compare::DiscreteSimilarity::Subequal => "subequal",
+                    ruggle_engine::compare::DiscreteSimilarity::Different => "different",
+                };
+                PartJson {
+                    discrete: Some(label),
+                    continuous: None,
+                }
+            }
+            Similarity::Continuous(v) => PartJson {
+                discrete: None,
+                continuous: Some(v),
+            },
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Json(SimilarityJson { score, parts }))
+}
+
+// Simple in-memory writer to capture tracing output
+struct SharedBuffer {
+    inner: Arc<Mutex<Vec<u8>>>,
+}
+
+struct SharedBufferWriter(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedBufferWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut g = self.0.lock().unwrap();
+        g.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> ts::fmt::MakeWriter<'a> for SharedBuffer {
+    type Writer = SharedBufferWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        SharedBufferWriter(self.inner.clone())
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CompareLogsJson {
+    score: f32,
+    parts: Vec<PartJson>,
+    logs: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugCompareParams {
+    scope: String,
+    query: String,
+    id: u32,
+}
+
+async fn debug_compare_logs_handler(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Query(params): Query<DebugCompareParams>,
+) -> Result<Json<CompareLogsJson>, (StatusCode, String)> {
+    let scope = Scope::try_from(params.scope.as_str()).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("parsing scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+    let query = parse_query(params.query.as_str())
+        .ok()
+        .map(|(_, q)| q)
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            format!("parsing query `{}` failed", params.query),
+        ))?;
+
+    use std::collections::HashMap as StdHashMap;
+    let state = state.read().await;
+    let krates = state.scopes.get(&scope).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("resolving scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+
+    // Locate item by id across crates in scope
+    let mut found: Option<(types::Item, &types::Crate)> = None;
+    for km in &krates {
+        if let Some(krate) = state.index.crates.get(km) {
+            if let Some(item) = krate.index.get(&types::Id(params.id)) {
+                found = Some((item.clone(), krate));
+                break;
+            }
+        }
+    }
+    let (item, krate) = found.ok_or((
+        StatusCode::NOT_FOUND,
+        format!(
+            "item with id {} not found in scope {}",
+            params.id, params.scope
+        ),
+    ))?;
+
+    // Capture tracing output for the comparison
+    let buf = Arc::new(Mutex::new(Vec::new()));
+    let make = SharedBuffer { inner: buf.clone() };
+    let subscriber = ts::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_line_number(true)
+        .with_file(true)
+        .without_time()
+        .with_writer(make)
+        .finish();
+
+    let (score, parts) = tracing::subscriber::with_default(subscriber, || {
+        let mut generics = types::Generics::default();
+        let mut substs: StdHashMap<String, query::Type> = StdHashMap::new();
+        let sims_vec = ruggle_engine::compare::Compare::compare(
+            &query,
+            &item,
+            krate,
+            &mut generics,
+            &mut substs,
+        );
+        let sims = Similarities(sims_vec.clone());
+        let score = sims.score();
+        let parts = sims_vec
+            .into_iter()
+            .map(|s| match s {
+                Similarity::Discrete(d) => {
+                    let label: &'static str = match d {
+                        ruggle_engine::compare::DiscreteSimilarity::Equivalent => "equivalent",
+                        ruggle_engine::compare::DiscreteSimilarity::Subequal => "subequal",
+                        ruggle_engine::compare::DiscreteSimilarity::Different => "different",
+                    };
+                    PartJson {
+                        discrete: Some(label),
+                        continuous: None,
+                    }
+                }
+                Similarity::Continuous(v) => PartJson {
+                    discrete: None,
+                    continuous: Some(v),
+                },
+            })
+            .collect::<Vec<_>>();
+        (score, parts)
+    });
+
+    let logs = {
+        let g = buf.lock().unwrap();
+        String::from_utf8_lossy(&g).to_string()
+    };
+
+    Ok(Json(CompareLogsJson { score, parts, logs }))
 }

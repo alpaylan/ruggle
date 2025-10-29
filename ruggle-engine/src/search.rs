@@ -6,7 +6,6 @@ use crate::{
     Parent,
 };
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use tracing::debug;
 
 use crate::{
@@ -14,6 +13,7 @@ use crate::{
     query::Query,
     Index,
 };
+use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hit {
@@ -39,16 +39,27 @@ impl PartialOrd for Hit {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum SearchError {
-    #[error("crate `{0}` is not present in the index")]
-    CrateNotFound(CrateMetadata),
+pub mod search_error {
+    pub fn crate_not_found(krate: &crate::types::CrateMetadata) -> anyhow::Error {
+        anyhow::anyhow!("crate `{}` is not present in the index", krate)
+    }
 
-    #[error("item with id `{0}` is not present in crate `{1}`")]
-    ItemNotFound(u32, CrateMetadata),
+    pub fn item_not_found(id: u32, krate: &crate::types::CrateMetadata) -> anyhow::Error {
+        anyhow::anyhow!("item with id `{}` is not present in crate `{}`", id, krate)
+    }
 }
 
-pub type Result<T> = std::result::Result<T, SearchError>;
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Set {
+    pub name: String,
+    pub crates: Vec<CrateMetadata>,
+}
+
+impl Set {
+    pub fn new(name: String, crates: Vec<CrateMetadata>) -> Self {
+        Set { name, crates }
+    }
+}
 
 /// Represents a scope to search in.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -61,9 +72,27 @@ pub enum Scope {
     /// For example:
     /// - `rustc_ast`, `rustc_ast_lowering`, `rustc_passes` and `rustc_ast_pretty`
     /// - `std`, `core` and `alloc`
-    Set(String, Vec<CrateMetadata>),
+    Set(String),
 }
 
+impl TryFrom<&str> for Scope {
+    type Error = anyhow::Error;
+
+    fn try_from(scope_str: &str) -> std::result::Result<Self, Self::Error> {
+        match scope_str.split(':').collect::<Vec<_>>().as_slice() {
+            ["set", set] => Ok(Scope::Set(set.to_string())),
+            ["crate", krate, version] => Ok(Scope::Crate(CrateMetadata {
+                name: krate.to_string(),
+                version: version.to_string(),
+            })),
+            ["crate", krate] => Ok(Scope::Crate(CrateMetadata {
+                name: krate.to_string(),
+                version: "*".to_string(),
+            })),
+            _ => Err(anyhow::anyhow!("parsing scope `{}` failed", scope_str)),
+        }
+    }
+}
 impl Scope {
     pub fn url(&self) -> String {
         match self {
@@ -71,16 +100,10 @@ impl Scope {
                 "https://raw.githubusercontent.com/alpaylan/ruggle-index/main/crate/{}.bin",
                 krate
             ),
-            Scope::Set(name, _) => format!(
+            Scope::Set(set) => format!(
                 "https://raw.githubusercontent.com/alpaylan/ruggle-index/main/set/{}.json",
-                name
+                set
             ),
-        }
-    }
-    pub fn flatten(self) -> Vec<CrateMetadata> {
-        match self {
-            Scope::Crate(krate) => vec![krate],
-            Scope::Set(_, krates) => krates,
         }
     }
 }
@@ -89,26 +112,29 @@ impl Index {
     /// Perform search with given query and scope.
     ///
     /// Returns [`Hit`]s whose similarity score outperforms given `threshold`.
-    pub fn search(&self, query: &Query, scope: Scope, threshold: f32) -> Result<Vec<Hit>> {
+    pub fn search(
+        &self,
+        query: &Query,
+        krates: &[CrateMetadata],
+        threshold: f32,
+    ) -> Result<Vec<Hit>> {
         tracing::debug!(
-            "searching with query: {:?}, scope: {:?}, threshold: {}",
+            "searching with query: {:?}, in crates: {:?}, threshold: {}",
             query,
-            scope,
+            krates,
             threshold
         );
         let mut hits = vec![];
 
-        let krates = scope.flatten();
-
         for krate_metadata in krates {
             let krate = self
                 .crates
-                .get(&krate_metadata)
-                .ok_or_else(|| SearchError::CrateNotFound(krate_metadata.clone()))?;
+                .get(krate_metadata)
+                .ok_or_else(|| search_error::crate_not_found(krate_metadata))?;
 
             let parents = self
                 .parents
-                .get(&krate_metadata)
+                .get(krate_metadata)
                 .expect("parent for a crate SHOULD ALWAYS be in 'parents' index");
 
             for item in krate.index.values() {
@@ -142,7 +168,7 @@ impl Index {
                             .iter()
                             .map(|id| {
                                 krate.index.get(id).ok_or_else(|| {
-                                    SearchError::ItemNotFound(id.0, krate_metadata.clone())
+                                    search_error::item_not_found(id.0, krate_metadata)
                                 })
                             })
                             .collect::<Result<Vec<_>>>()?;
@@ -231,7 +257,7 @@ impl Index {
             if let Some(segs) = reconstruct_path_for_local(krate, id, parents) {
                 return Ok(segs);
             }
-            Err(SearchError::ItemNotFound(id.0, kinfo.to_owned()))
+            Err(search_error::item_not_found(id.0, &kinfo))
         };
 
         let path = get_path(&item.id)?;
