@@ -13,3 +13,4 @@ Cargo.lock
 **/indexer-crates/
 **/out/
 **/*.vsix
+**/*.log

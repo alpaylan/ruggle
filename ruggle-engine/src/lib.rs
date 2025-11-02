@@ -96,7 +96,7 @@ impl Path {
             }
             link.push_str(&format!("{}.html#", owner.name.as_deref().unwrap_or("")));
             link.push_str(&format!(
-                "method.{}.html",
+                "method.{}",
                 self.item.name.as_deref().unwrap_or("")
             ));
         } else {

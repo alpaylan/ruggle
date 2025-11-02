@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use crate::{
     reconstruct_path_for_local,
-    types::{self, CrateMetadata, GenericArgs},
+    types::{self, CrateMetadata, GenericArgs, ItemEnum},
     Parent,
 };
+
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -207,15 +208,16 @@ impl Index {
         Ok(hits)
     }
 
-    #[tracing::instrument(skip(self, krate))]
-    fn compare(
+    #[tracing::instrument(skip(self, krate, query, item), fields(query = %query, item = %item))]
+    pub fn compare(
         &self,
         query: &Query,
         item: &types::Item,
         krate: &types::Crate,
         impl_: Option<&types::Impl>,
     ) -> Similarities {
-        let mut generics;
+        tracing::trace!("Comparing {} with {}", query, item);
+        let mut generics = types::Generics::default();
         if let Some(impl_) = impl_ {
             generics = impl_.generics.clone();
             generics
@@ -225,7 +227,42 @@ impl Index {
                     rhs: types::Term::Type(impl_.for_.clone()),
                 });
         } else {
-            generics = types::Generics::default()
+            // check if the function has an owner (immediate parent)
+            let parents = self.parents.get(&krate.crate_metadata()).unwrap();
+            tracing::trace!("Checking if {:?} has an owner", item);
+            match parents.get(&item.id) {
+                Some(Parent::Struct(sid)) => {
+                    tracing::trace!("Found owner: {:?}", sid);
+                    let struct_ = krate.index.get(sid).unwrap();
+
+                    generics
+                        .where_predicates
+                        .push(types::WherePredicate::EqPredicate {
+                            lhs: types::Type::Generic("Self".to_owned()),
+                            rhs: types::Term::Type(struct_.clone().into()),
+                        });
+                }
+                Some(Parent::Impl(iid)) => {
+                    tracing::trace!("Found owner: {:?}", iid);
+                    let impl_ = krate.index.get(iid).unwrap();
+                    let ItemEnum::Impl(ref impl_) = &impl_.inner else {
+                        unreachable!();
+                    };
+                    let for_ = impl_.for_.clone();
+                    generics
+                        .where_predicates
+                        .push(types::WherePredicate::EqPredicate {
+                            lhs: types::Type::Generic("Self".to_owned()),
+                            rhs: types::Term::Type(for_),
+                        });
+                }
+                Some(p) => {
+                    tracing::trace!("Found owner: {:?}", p);
+                }
+                None => {
+                    tracing::trace!("No owner found for {}", item);
+                }
+            }
         }
         let mut substs = HashMap::default();
         let sims = query.compare(item, krate, &mut generics, &mut substs);

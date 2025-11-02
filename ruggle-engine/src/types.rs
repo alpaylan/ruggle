@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::{self, Display};
+use std::fmt::{self, Debug, Display};
 use std::path::PathBuf;
 
 use serde::{de, Deserialize, Deserializer, Serialize};
@@ -192,7 +192,7 @@ pub struct ItemSummary {
 ///
 /// The `Item` data type holds fields that can apply to any of these,
 /// and leaves kind-specific details (like function args or enum variants) to the `inner` field.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, bincode::Decode, bincode::Encode)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, bincode::Decode, bincode::Encode)]
 pub struct Item {
     /// The unique identifier of this item. Can be used to find this item in various mappings.
     pub id: Id,
@@ -228,6 +228,45 @@ pub struct Item {
     pub deprecation: Option<Deprecation>,
     /// The type-specific fields describing this item.
     pub inner: ItemEnum,
+}
+
+impl Debug for Item {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Item")
+            .field("id", &self.id)
+            .field("crate_id", &self.crate_id)
+            .field("name", &self.name)
+            .field("span", &self.span)
+            // .field("visibility", &self.visibility)
+            // .field("docs", &self.docs)
+            // .field("links", &self.links)
+            // .field("attrs", &self.attrs)
+            // .field("deprecation", &self.deprecation)
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+
+impl From<Item> for Type {
+    fn from(item: Item) -> Self {
+        match item.inner {
+            ItemEnum::Struct(struct_) => Type::ResolvedPath(Path {
+                path: item.name.clone().unwrap_or_default(),
+                id: item.id,
+                args: Some(Box::new(GenericArgs::AngleBracketed {
+                    args: struct_
+                        .generics
+                        .params
+                        .iter()
+                        .map(|param| param.to_generic_arg())
+                        .collect(),
+                    constraints: vec![],
+                })),
+            }),
+            // For now, return an inferred type for unsupported Item kinds.
+            _ => Type::Infer,
+        }
+    }
 }
 
 impl Display for Item {
@@ -1319,6 +1358,30 @@ impl Display for GenericParamDef {
                 }
                 Ok(())
             }
+        }
+    }
+}
+
+impl GenericParamDef {
+    pub fn to_generic_arg(&self) -> GenericArg {
+        match &self.kind {
+            GenericParamDefKind::Lifetime { .. } => {
+                let name = if self.name.starts_with('\'') {
+                    self.name.clone()
+                } else {
+                    format!("'{}", self.name)
+                };
+                GenericArg::Lifetime(name)
+            }
+            GenericParamDefKind::Type { default, .. } => {
+                let ty = default.clone().unwrap_or(Type::Generic(self.name.clone()));
+                GenericArg::Type(ty)
+            }
+            GenericParamDefKind::Const { .. } => GenericArg::Const(Constant {
+                expr: self.name.clone(),
+                value: None,
+                is_literal: false,
+            }),
         }
     }
 }

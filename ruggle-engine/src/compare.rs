@@ -88,7 +88,7 @@ pub trait Compare<Rhs> {
 }
 
 impl Compare<Item> for Query {
-    #[instrument(skip(self, krate, item), fields(query = %self, item = %item))]
+    #[instrument(name = "cmp_query", skip(self, item, krate, generics, substs), fields(query = %self, item = %item))]
     fn compare(
         &self,
         item: &Item,
@@ -106,16 +106,16 @@ impl Compare<Item> for Query {
         trace!(?sims);
 
         if let Some(ref kind) = self.kind {
-            sims.append(&mut kind.compare(&item.inner, krate, generics, substs))
+            sims.append(&mut kind.compare(&item.inner, krate, generics, substs));
+            trace!(?sims);
         }
-        trace!(?sims);
 
         sims
     }
 }
 
 impl Compare<String> for Symbol {
-    #[instrument]
+    #[instrument(name = "cmp_symbol", skip(self, symbol), fields(self = %self, symbol = %symbol))]
     fn compare(
         &self,
         symbol: &String,
@@ -133,7 +133,7 @@ impl Compare<String> for Symbol {
 }
 
 impl Compare<types::ItemEnum> for QueryKind {
-    #[instrument(skip(self, krate, kind), fields(query = %self, kind= %kind))]
+    #[instrument(name = "cmp_kind", skip(self, kind, krate, generics, substs), fields(self = %self, kind = %kind))]
     fn compare(
         &self,
         kind: &types::ItemEnum,
@@ -153,7 +153,7 @@ impl Compare<types::ItemEnum> for QueryKind {
 }
 
 impl Compare<Qualifier> for Qualifier {
-    #[instrument]
+    #[instrument(name = "cmp_qual", skip(self, qualifer), fields(self = ?self, rhs = ?qualifer))]
     fn compare(
         &self,
         qualifer: &Qualifier,
@@ -173,7 +173,7 @@ impl Compare<Qualifier> for Qualifier {
     }
 }
 impl Compare<types::Function> for Function {
-    #[instrument(skip(function, krate, generics, substs), fields(decl = %self.decl, qualifiers = ?self.qualifiers))]
+    #[instrument(name = "cmp_fn", skip(self, function, krate, generics, substs), fields(decl = %self.decl, qualifiers = ?self.qualifiers, function = %function, generics = ?generics, substs = ?substs))]
     fn compare(
         &self,
         function: &types::Function,
@@ -215,7 +215,7 @@ impl Compare<types::Function> for Function {
 }
 
 impl Compare<types::FunctionSignature> for FnDecl {
-    #[instrument(skip(decl, krate, generics, substs), fields(decl = %self, sig = %decl))]
+    #[instrument(name = "cmp_sig", skip(self, decl, krate, generics, substs), fields(decl = %self, sig = %decl))]
     fn compare(
         &self,
         decl: &types::FunctionSignature,
@@ -238,20 +238,20 @@ impl Compare<types::FunctionSignature> for FnDecl {
             } else if inputs.is_empty() && decl.inputs.is_empty() {
                 sims.push(Discrete(Equivalent));
             }
+            trace!(?sims);
         }
-        trace!(?sims);
 
         if let Some(ref output) = self.output {
             sims.append(&mut output.compare(&decl.output, krate, generics, substs));
+            trace!(?sims);
         }
-        trace!(?sims);
 
         sims
     }
 }
 
 impl Compare<(String, types::Type)> for Argument {
-    #[instrument(skip(arg, krate, generics, substs), fields(arg_name = ?self.name, has_type = %self.ty.is_some()))]
+    #[instrument(name = "cmp_arg", skip(self, arg, krate, generics, substs), fields(self_name = ?self.name, self_has_type = %self.ty.as_ref().map(|t| t.to_string()).unwrap_or("<NONE>".to_string()), arg_name = %arg.0, arg_type = %arg.1))]
     fn compare(
         &self,
         arg: &(String, types::Type),
@@ -263,20 +263,20 @@ impl Compare<(String, types::Type)> for Argument {
 
         if let Some(ref name) = self.name {
             sims.append(&mut name.compare(&arg.0, krate, generics, substs));
+            trace!(?sims);
         }
-        trace!(?sims);
 
         if let Some(ref type_) = self.ty {
             sims.append(&mut type_.compare(&arg.1, krate, generics, substs));
+            trace!(?sims);
         }
-        trace!(?sims);
 
         sims
     }
 }
 
 impl Compare<Option<types::Type>> for FnRetTy {
-    #[instrument(skip(ret_ty, krate, generics, substs), fields(expected = ?self))]
+    #[instrument(name = "cmp_ret", skip(self, ret_ty, krate, generics, substs), fields(expected = ?self, actual = ?ret_ty))]
     fn compare(
         &self,
         ret_ty: &Option<types::Type>,
@@ -292,6 +292,7 @@ impl Compare<Option<types::Type>> for FnRetTy {
     }
 }
 
+#[instrument(name = "cmp_typ", skip(lhs, rhs, krate, generics, substs), fields(expected = ?lhs, actual = ?rhs))]
 fn compare_type(
     lhs: &Type,
     rhs: &types::Type,
@@ -301,7 +302,7 @@ fn compare_type(
     _allow_recursion: bool,
 ) -> Vec<Similarity> {
     use {crate::query::Type::*, types::Type};
-
+    tracing::trace!(?lhs, ?rhs, "comparing types");
     match (lhs, rhs) {
         (q, Type::Generic(i)) if i == "Self" => {
             let mut i = None;
@@ -317,6 +318,7 @@ fn compare_type(
                     }
                 }
             }
+            trace!(?i);
 
             match i {
                 None => {
@@ -485,7 +487,6 @@ fn compare_type(
 }
 
 impl Compare<types::Type> for Type {
-    #[instrument(skip(type_, krate, generics, substs), fields(qty = ?self))]
     fn compare(
         &self,
         type_: &types::Type,
@@ -498,7 +499,6 @@ impl Compare<types::Type> for Type {
 }
 
 impl Compare<types::Term> for Type {
-    #[instrument(skip(type_, krate, generics, substs), fields(qty = ?self))]
     fn compare(
         &self,
         type_: &types::Term,
@@ -514,7 +514,7 @@ impl Compare<types::Term> for Type {
 }
 
 impl Compare<String> for PrimitiveType {
-    #[instrument]
+    #[instrument(name = "cmp_prim", skip(self, prim_ty), fields(self = ?self, prim = ?prim_ty))]
     fn compare(
         &self,
         prim_ty: &String,

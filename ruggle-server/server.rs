@@ -34,9 +34,11 @@ use tower_http::{
 
 use ruggle_engine::compare::{Similarities, Similarity};
 use ruggle_engine::query::parse::parse_query;
+use ruggle_engine::Path as DocPath;
 use ruggle_engine::{build_parent_index, types};
 use ruggle_engine::{query, Index};
-use tracing_subscriber as ts;
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::{self as ts, Layer as _};
 
 const STATIC_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
 
@@ -181,6 +183,7 @@ async fn main() {
         .route("/debug/similarity", get(debug_similarity_handler))
         .route("/debug/query", get(debug_query_handler))
         .route("/debug/compare_logs", get(debug_compare_logs_handler))
+        .route("/debug/doc", get(debug_doc_handler))
         .route("/", get(index_page))
         .nest_service("/static", static_service)
         .with_state(state)
@@ -229,13 +232,65 @@ async fn index_page() -> Result<Html<String>, (StatusCode, String)> {
 }
 
 fn init_logger() {
-    use tracing_subscriber::EnvFilter;
-    tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+    use tracing_subscriber::{
+        filter::{LevelFilter, Targets},
+        fmt,
+        layer::SubscriberExt,
+        util::SubscriberInitExt,
+        EnvFilter,
+    };
+
+    // Console (env-controlled) layer (no ANSI)
+    let console_layer = fmt::layer()
+        .with_ansi(true)
+        .with_file(true)
+        .with_line_number(true)
+        .without_time();
+
+    // File layer: always TRACE, non-ANSI, to debug.log
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("debug.log")
+        .unwrap_or_else(|e| panic!("failed to open debug.log: {}", e));
+    let file_mw = LogFileMakeWriter(Arc::new(Mutex::new(file)));
+    let file_layer = fmt::layer()
+        .with_ansi(false)
         .with_file(true)
         .with_line_number(true)
         .without_time()
+        .with_writer(file_mw);
+
+    // Limit file logs to our crates
+    let our_targets = Targets::new()
+        .with_target("ruggle_server", LevelFilter::TRACE)
+        .with_target("ruggle_engine", LevelFilter::TRACE);
+
+    tracing_subscriber::registry()
+        .with(console_layer.with_filter(EnvFilter::from_default_env()))
+        .with(file_layer.with_filter(our_targets))
         .init();
+}
+
+// Simple file MakeWriter for the non-ANSI log file
+struct LogFileWriter(Arc<Mutex<File>>);
+impl std::io::Write for LogFileWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use std::io::Write as _;
+        let mut g = self.0.lock().unwrap();
+        g.write_all(buf)?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+struct LogFileMakeWriter(Arc<Mutex<File>>);
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogFileMakeWriter {
+    type Writer = LogFileWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        LogFileWriter(self.0.clone())
+    }
 }
 
 #[derive(Serialize)]
@@ -627,13 +682,10 @@ async fn debug_similarity_handler(
         ),
     ))?;
 
-    let mut generics = types::Generics::default();
-    let mut substs: StdHashMap<String, query::Type> = StdHashMap::new();
-    let sims_vec =
-        ruggle_engine::compare::Compare::compare(&query, &item, krate, &mut generics, &mut substs);
-    let sims = Similarities(sims_vec.clone());
+    let sims = state.index.compare(&query, &item, krate, None);
     let score = sims.score();
-    let parts = sims_vec
+    let parts = sims
+        .0
         .into_iter()
         .map(|s| match s {
             Similarity::Discrete(d) => {
@@ -655,6 +707,106 @@ async fn debug_similarity_handler(
         .collect::<Vec<_>>();
 
     Ok(Json(SimilarityJson { score, parts }))
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugDocParams {
+    scope: String,
+    id: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct DocJson {
+    link: String,
+    path: Vec<String>,
+}
+
+async fn debug_doc_handler(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Query(params): Query<DebugDocParams>,
+) -> Result<Json<DocJson>, (StatusCode, String)> {
+    let scope = Scope::try_from(params.scope.as_str()).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("parsing scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+    let state = state.read().await;
+    let krates = state.scopes.get(&scope).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("resolving scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+
+    // Find the item and its crate metadata
+    let mut found: Option<(
+        types::Item,
+        &types::Crate,
+        &ruggle_engine::types::CrateMetadata,
+    )> = None;
+    for km in &krates {
+        if let Some(krate) = state.index.crates.get(km) {
+            if let Some(item) = krate.index.get(&types::Id(params.id)) {
+                found = Some((item.clone(), krate, km));
+                break;
+            }
+        }
+    }
+    let (item, krate, km) = found.ok_or((
+        StatusCode::NOT_FOUND,
+        format!(
+            "item with id {} not found in scope {}",
+            params.id, params.scope
+        ),
+    ))?;
+
+    // Reconstruct path from parents index
+    let parents = state.index.parents.get(km).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "parents not found".to_string(),
+    ))?;
+
+    let mut path = DocPath {
+        name: krate.name.clone().unwrap_or_default(),
+        modules: vec![],
+        owner: None,
+        item: item.clone(),
+    };
+
+    let mut walker = Some(item.id);
+    while let Some(here) = walker {
+        match parents.get(&here) {
+            Some(ruggle_engine::Parent::Module(mid)) => {
+                let mi = &krate.index[mid];
+                if let types::ItemEnum::Module(m) = &mi.inner {
+                    if m.is_crate {
+                        path.modules.push(mi.clone());
+                        break;
+                    }
+                }
+                if mi.name.is_some() {
+                    path.modules.push(mi.clone());
+                }
+                walker = Some(*mid);
+            }
+            Some(ruggle_engine::Parent::Trait(tid))
+            | Some(ruggle_engine::Parent::Impl(tid))
+            | Some(ruggle_engine::Parent::Struct(tid)) => {
+                path.owner = Some(krate.index.get(tid).unwrap().clone());
+                walker = Some(*tid);
+            }
+            None => break,
+        }
+    }
+    path.modules.reverse();
+
+    let link = path.link();
+    let path_vec = path.pathify();
+    Ok(Json(DocJson {
+        link,
+        path: path_vec,
+    }))
 }
 
 // Simple in-memory writer to capture tracing output
@@ -714,7 +866,6 @@ async fn debug_compare_logs_handler(
             format!("parsing query `{}` failed", params.query),
         ))?;
 
-    use std::collections::HashMap as StdHashMap;
     let state = state.read().await;
     let krates = state.scopes.get(&scope).map_err(|e| {
         (
@@ -750,22 +901,15 @@ async fn debug_compare_logs_handler(
         .with_line_number(true)
         .with_file(true)
         .without_time()
+        .with_span_events(FmtSpan::NONE)
         .with_writer(make)
         .finish();
 
     let (score, parts) = tracing::subscriber::with_default(subscriber, || {
-        let mut generics = types::Generics::default();
-        let mut substs: StdHashMap<String, query::Type> = StdHashMap::new();
-        let sims_vec = ruggle_engine::compare::Compare::compare(
-            &query,
-            &item,
-            krate,
-            &mut generics,
-            &mut substs,
-        );
-        let sims = Similarities(sims_vec.clone());
+        let sims = state.index.compare(&query, &item, krate, None);
         let score = sims.score();
-        let parts = sims_vec
+        let parts = sims
+            .0
             .into_iter()
             .map(|s| match s {
                 Similarity::Discrete(d) => {

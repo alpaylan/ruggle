@@ -171,8 +171,8 @@
       border: 1px solid #222836;
       background: #0a0e15;
       border-radius: 8px;
-      white-space: pre-wrap;
-      word-break: break-word;
+      white-space: pre;
+      overflow-x: auto;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size: 13px;
       line-height: 1.4;
@@ -187,6 +187,163 @@
 
     .logs .log-line:last-child {
       border-bottom: 0;
+    }
+
+    /* Log badges */
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 10px;
+      margin-right: 8px;
+      line-height: 1;
+    }
+
+    .badge-trace {
+      background: #16203a;
+      color: #c3dafe;
+      border: 1px solid #223563;
+    }
+
+    .badge-debug {
+      background: #1a2837;
+      color: #b3e5fc;
+      border: 1px solid #27445b;
+    }
+
+    .badge-info {
+      background: #123524;
+      color: #b9f6ca;
+      border: 1px solid #205c3d;
+    }
+
+    .badge-warn {
+      background: #3a2d12;
+      color: #ffe082;
+      border: 1px solid #5f4a1a;
+    }
+
+    .badge-error {
+      background: #3a1616;
+      color: #ff8a80;
+      border: 1px solid #5f2222;
+    }
+
+    .log-msg {
+      display: inline-block;
+      margin: 0;
+      white-space: pre;
+    }
+
+    .log-meta {
+      display: block;
+      font-size: 11px;
+      color: #8aa0b8;
+      margin-top: 2px;
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+
+    .modal-backdrop.show {
+      display: flex;
+    }
+
+    .modal-box {
+      background: var(--bg2);
+      border: 1px solid #222836;
+      border-radius: 10px;
+      width: min(92vw, 1200px);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid #222836;
+      background: #0f131a;
+    }
+
+    .modal-title {
+      font-weight: 700;
+    }
+
+    .close-btn {
+      background: transparent;
+      border: none;
+      color: var(--fg);
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    /* Graph modal */
+    .graph-box {
+      width: min(96vw, 1200px);
+      max-height: 90vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .graph-header {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid #222836;
+      background: #0f131a;
+    }
+
+    .graph-body {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 12px;
+      padding: 12px;
+      overflow: auto;
+    }
+
+    .tree {
+      background: #0f131a;
+      border: 1px solid #222836;
+      border-radius: 8px;
+      padding: 8px;
+      overflow: auto;
+    }
+
+    .tree ul {
+      list-style: none;
+      padding-left: 16px;
+      margin: 0;
+    }
+
+    .tree li {
+      margin: 2px 0;
+    }
+
+    .tree .toggle {
+      cursor: pointer;
+      color: var(--accent);
+    }
+
+    .details {
+      background: #0f131a;
+      border: 1px solid #222836;
+      border-radius: 8px;
+      padding: 8px;
+      overflow: auto;
     }
 
     .row {
@@ -226,19 +383,58 @@
         <label class="sr-only" for="run">Search</label>
         <button id="run">Search</button>
       </div>
+      <div>
+        <label class="sr-only" for="openGraph">Graph</label>
+        <button id="openGraph">Graph</button>
+      </div>
     </div>
     <div class="hint">Scopes are provided by <code>/scopes</code>. Results come from <code>/search</code>.</div>
     <div id="functions" class="results"></div>
     <div id="results" class="results"></div>
   </main>
+  <div id="logs-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">Compare logs</div>
+        <button id="logsClose" class="close-btn" aria-label="Close">×</button>
+      </div>
+      <div id="logsContent" class="logs"></div>
+    </div>
+  </div>
+  <div id="graph-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-box graph-box">
+      <div class="graph-header">
+        <div class="modal-title">Graph Explorer</div>
+        <span style="flex:1 1 auto"></span>
+        <label for="graphCrate">Crate</label>
+        <select id="graphCrate"></select>
+        <button id="graphClose" class="close-btn" aria-label="Close">×</button>
+      </div>
+      <div class="graph-body">
+        <div class="tree">
+          <ul id="graphTree"></ul>
+        </div>
+        <div class="details" id="graphDetails">Select a node</div>
+      </div>
+    </div>
+  </div>
   <script>
     const scopeEl = document.getElementById('scope');
     const queryEl = document.getElementById('query');
     const limitEl = document.getElementById('limit');
     const thresholdEl = document.getElementById('threshold');
     const runBtn = document.getElementById('run');
+    const openGraphBtn = document.getElementById('openGraph');
     const resultsEl = document.getElementById('results');
     const functionsEl = document.getElementById('functions');
+    const logsModalEl = document.getElementById('logs-modal');
+    const logsCloseBtn = document.getElementById('logsClose');
+    const logsContentEl = document.getElementById('logsContent');
+    const graphModalEl = document.getElementById('graph-modal');
+    const graphCloseBtn = document.getElementById('graphClose');
+    const graphCrateSel = document.getElementById('graphCrate');
+    const graphTreeEl = document.getElementById('graphTree');
+    const graphDetailsEl = document.getElementById('graphDetails');
     let currentController = null;
 
     function debounce(fn, wait) {
@@ -247,6 +443,194 @@
         clearTimeout(t);
         t = setTimeout(() => fn(...args), wait);
       };
+    }
+
+    function openLogsModal() {
+      logsModalEl.classList.add('show');
+      logsModalEl.setAttribute('aria-hidden', 'false');
+    }
+    function closeLogsModal() {
+      logsModalEl.classList.remove('show');
+      logsModalEl.setAttribute('aria-hidden', 'true');
+    }
+    logsCloseBtn.addEventListener('click', closeLogsModal);
+    logsModalEl.addEventListener('click', (e) => { if (e.target === logsModalEl) closeLogsModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLogsModal(); });
+    function openGraphModal() { graphModalEl.classList.add('show'); graphModalEl.setAttribute('aria-hidden', 'false'); }
+    function closeGraphModal() { graphModalEl.classList.remove('show'); graphModalEl.setAttribute('aria-hidden', 'true'); }
+    graphCloseBtn.addEventListener('click', closeGraphModal);
+    graphModalEl.addEventListener('click', (e) => { if (e.target === graphModalEl) closeGraphModal(); });
+    openGraphBtn.addEventListener('click', async () => {
+      openGraphModal();
+      // populate crates in selector
+      graphCrateSel.innerHTML = '';
+      try {
+        const metas = await fetch('/index').then(r => r.json());
+        for (const m of metas) {
+          const opt = document.createElement('option');
+          opt.value = `${m.name}:${m.version}`;
+          opt.textContent = `${m.name}:${m.version}`;
+          graphCrateSel.appendChild(opt);
+        }
+      } catch { }
+      if (graphCrateSel.value) loadGraph(graphCrateSel.value);
+    });
+    graphCrateSel.addEventListener('change', () => { if (graphCrateSel.value) loadGraph(graphCrateSel.value); });
+
+    async function loadGraph(crateKey) {
+      try {
+        const params = new URLSearchParams();
+        params.set('crate', crateKey);
+        const data = await fetch('/debug/parents?' + params.toString()).then(r => r.json());
+        renderGraph(data);
+      } catch (e) {
+        graphTreeEl.innerHTML = '<li>Failed to load graph</li>';
+      }
+    }
+
+    function buildAdj(edges) {
+      const childrenOf = new Map();
+      for (const e of edges) {
+        if (!childrenOf.has(e.from)) childrenOf.set(e.from, []);
+        childrenOf.get(e.from).push(e.to);
+      }
+      return childrenOf;
+    }
+    function indexNodes(nodes) {
+      const m = new Map();
+      for (const n of nodes) m.set(n.id, n);
+      return m;
+    }
+    function roots(nodes, edges) {
+      const childSet = new Set(edges.map(e => e.to));
+      const parentSet = new Set(edges.map(e => e.from));
+      const res = [];
+      for (const n of nodes) if (parentSet.has(n.id) && !childSet.has(n.id)) res.push(n.id);
+      // If no clear roots, fall back to any modules
+      if (res.length === 0) for (const n of nodes) if (n.kind === 'module') res.push(n.id);
+      return Array.from(new Set(res));
+    }
+    function renderGraph(graph) {
+      const nodeById = indexNodes(graph.nodes);
+      const kids = buildAdj(graph.edges);
+      graphTreeEl.innerHTML = '';
+      const rootIds = roots(graph.nodes, graph.edges);
+      for (const rid of rootIds) {
+        const li = renderNode(rid, nodeById, kids);
+        graphTreeEl.appendChild(li);
+      }
+    }
+    function renderNode(id, nodeById, kids) {
+      const n = nodeById.get(id);
+      const li = document.createElement('li');
+      const hasChildren = Array.isArray(kids.get(id)) && kids.get(id).length > 0;
+      const title = document.createElement('span');
+      title.className = 'toggle';
+      title.textContent = `${n?.name || '<unnamed>'} (${n?.kind || 'item'})`;
+      title.addEventListener('click', async () => {
+        graphDetailsEl.innerHTML = '';
+        const hdr = document.createElement('div');
+        hdr.className = 'name';
+        hdr.textContent = n?.name || '<unnamed>';
+        const meta = document.createElement('div');
+        meta.className = 'path';
+        meta.textContent = `id: ${n.id} • kind: ${n.kind}`;
+        graphDetailsEl.appendChild(hdr);
+        graphDetailsEl.appendChild(meta);
+        // docs link
+        try {
+          const p = new URLSearchParams();
+          p.set('scope', `crate:${graphCrateSel.value}`);
+          p.set('id', String(n.id));
+          const info = await fetch('/debug/doc?' + p.toString()).then(r => r.json());
+          const linkDiv = document.createElement('div');
+          const a = document.createElement('a');
+          a.href = info.link; a.target = '_blank'; a.rel = 'noreferrer noopener'; a.textContent = 'Open docs';
+          linkDiv.appendChild(a);
+          graphDetailsEl.appendChild(linkDiv);
+        } catch { }
+      });
+      li.appendChild(title);
+      if (hasChildren) {
+        const ul = document.createElement('ul');
+        for (const cid of kids.get(id)) ul.appendChild(renderNode(cid, nodeById, kids));
+        li.appendChild(ul);
+      }
+      return li;
+    }
+
+    function insertBreaksInBraces(s) {
+      if (!s) return '';
+      let out = String(s);
+      // 1) Break before nested cmp_ spans like ":cmp_sig" or ":cmp_fn".
+      out = out.replace(/:cmp_[A-Za-z0-9_]+/g, (m) => '\n' + m);
+      // 2) For any " key=..." style, break at the whitespace before the key.
+      // Replace the preceding space/tab with a newline while keeping key=value intact.
+      out = out.replace(/[\t ]([^\s=]+)=/g, (_m, key) => `\n  ${key}=`);
+      return out;
+    }
+
+    function extractMetaSegments(s) {
+      // Parse segments shaped like ": <target::path>: <file/path.rs>:<line>:"
+      // They may appear before the actual message and may repeat.
+      let text = String(s || '');
+      const metas = [];
+      // Work from the end to avoid index shifts
+      for (; ;) {
+        const dbl = text.lastIndexOf('::');
+        if (dbl === -1) break;
+        const pre = text.lastIndexOf(':', dbl - 1);
+        if (pre === -1) break;
+        const post = text.indexOf(':', dbl + 2);
+        if (post === -1) break;
+        const target = text.slice(pre + 1, post).trim();
+        const fileSep = text.indexOf(':', post + 1);
+        if (fileSep === -1) break;
+        const endSep = text.indexOf(':', fileSep + 1);
+        if (endSep === -1) break;
+        const file = text.slice(post + 1, fileSep).trim();
+        const line = text.slice(fileSep + 1, endSep).trim();
+        if (!file || !target) break;
+        metas.unshift({ target, file, line });
+        text = (text.slice(0, pre) + '\n' + text.slice(endSep + 1)).replace(/\s{2,}/g, ' ').trim();
+      }
+      return { text, metas };
+    }
+
+    function renderLogs(text) {
+      logsContentEl.innerHTML = '';
+      const lines = String(text || '').split('\n');
+      for (const raw of lines) {
+        const line = raw || ' ';
+        const m = line.match(/^(TRACE|DEBUG|INFO|WARN|ERROR)\s*(.*)$/);
+        const lvl = m ? m[1] : 'LOG';
+        let rest = m ? m[2] : line;
+        const metaParsed = extractMetaSegments(rest);
+        rest = metaParsed.text;
+        const formatted = insertBreaksInBraces(rest);
+        const row = document.createElement('div');
+        row.className = 'log-line';
+        const badge = document.createElement('span');
+        badge.className = 'badge ' + 'badge-' + lvl.toLowerCase();
+        badge.textContent = lvl;
+        const msg = document.createElement('pre');
+        msg.className = 'log-msg';
+        msg.textContent = formatted;
+        row.appendChild(badge);
+        row.appendChild(msg);
+        if (metaParsed.metas.length) {
+          for (const entry of metaParsed.metas) {
+            const meta = document.createElement('span');
+            meta.className = 'log-meta';
+            const pieces = [];
+            if (entry.target) pieces.push(entry.target);
+            if (entry.file) pieces.push(`${entry.file}${entry.line ? `:${entry.line}` : ''}`);
+            meta.textContent = pieces.join(' • ');
+            row.appendChild(meta);
+          }
+        }
+        logsContentEl.appendChild(row);
+      }
     }
 
     async function loadScopes() {
@@ -439,6 +823,7 @@
     }
 
     function formatSimilarity(sim) {
+      console.log(sim);
       if (!sim) return '';
       const parts = Array.isArray(sim.parts) ? sim.parts.map(p => {
         if (p.discrete) return p.discrete;
@@ -455,7 +840,7 @@
       return it.id;
     }
 
-    function renderFunctions(items, simById = null, parsedQuery = null) {
+    function renderFunctions(items, simById = null, parsedQuery = null, docById = null) {
       functionsEl.innerHTML = '';
       if (parsedQuery) {
         const qhdr = document.createElement('div');
@@ -598,35 +983,19 @@
           const logsBtn = document.createElement('button');
           logsBtn.className = 'btn-link';
           logsBtn.textContent = 'View compare logs';
-          const logsWrap = document.createElement('details');
-          const logsSummary = document.createElement('summary');
-          logsSummary.textContent = 'Logs';
-          const logsBox = document.createElement('div');
-          logsBox.className = 'logs';
-          logsWrap.style.display = 'none';
-          logsWrap.appendChild(logsSummary);
-          logsWrap.appendChild(logsBox);
           logsBtn.addEventListener('click', async () => {
             try {
               logsBtn.disabled = true;
               logsBtn.textContent = 'Fetching logs…';
+              openLogsModal();
+              renderLogs('Loading…');
               const p = new URLSearchParams();
               p.set('scope', scopeEl.value || '');
               p.set('query', qStr);
               p.set('id', String(sid));
               const r = await fetch('/debug/compare_logs?' + p.toString());
               const data = await r.json();
-              const text = String(data.logs || '');
-              const lines = text.split('\n');
-              logsBox.innerHTML = '';
-              for (const line of lines) {
-                const div = document.createElement('div');
-                div.className = 'log-line';
-                div.textContent = line.length ? line : ' ';
-                logsBox.appendChild(div);
-              }
-              logsWrap.style.display = 'block';
-              logsWrap.open = true;
+              renderLogs(data.logs || '');
               logsBtn.textContent = 'View compare logs';
             } catch (e) {
               logsBtn.textContent = 'Logs error';
@@ -635,7 +1004,20 @@
             }
           });
           right.appendChild(logsBtn);
-          right.appendChild(logsWrap);
+        }
+
+        // Docs link (if available)
+        const sid2 = getItemId(it);
+        if (sid2 != null && docById && docById.get(String(sid2))) {
+          const info = docById.get(String(sid2));
+          const linkWrap = document.createElement('div');
+          const a = document.createElement('a');
+          a.href = info.link;
+          a.target = '_blank';
+          a.rel = 'noreferrer noopener';
+          a.textContent = 'Open docs';
+          linkWrap.appendChild(a);
+          right.appendChild(linkWrap);
         }
 
         card.appendChild(main);
@@ -654,6 +1036,20 @@
         const res = await fetch('/debug/functions?' + params.toString());
         let functions = await res.json();
         const q = queryEl.value.trim();
+        // Prefetch doc links for all items
+        const docEntries = await Promise.allSettled(functions.map(async (it) => {
+          const id = getItemId(it);
+          if (id == null) throw new Error('no id');
+          const p = new URLSearchParams();
+          p.set('scope', scope);
+          p.set('id', String(id));
+          const r = await fetch('/debug/doc?' + p.toString());
+          const info = await r.json();
+          return [String(id), info];
+        }));
+        const docById = new Map(docEntries
+          .filter(e => e.status === 'fulfilled')
+          .map(e => e.value));
         if (q.length > 0) {
           // fetch parsed query for display
           let parsed = null;
@@ -684,10 +1080,10 @@
             if (typeof sb === 'number') return 1;
             return 0;
           });
-          renderFunctions(functions, simById, parsed);
+          renderFunctions(functions, simById, parsed, docById);
           return;
         }
-        renderFunctions(functions, null, null);
+        renderFunctions(functions, null, null, docById);
       } catch (e) {
         console.error(e);
       }
