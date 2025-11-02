@@ -387,6 +387,10 @@
         <label class="sr-only" for="openGraph">Graph</label>
         <button id="openGraph">Graph</button>
       </div>
+      <div>
+        <label class="sr-only" for="openTypes">Types</label>
+        <button id="openTypes">Types</button>
+      </div>
     </div>
     <div class="hint">Scopes are provided by <code>/scopes</code>. Results come from <code>/search</code>.</div>
     <div id="functions" class="results"></div>
@@ -418,6 +422,24 @@
       </div>
     </div>
   </div>
+  <div id="types-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-box graph-box">
+      <div class="graph-header">
+        <div class="modal-title">Types Explorer</div>
+        <span style="flex:1 1 auto"></span>
+        <label for="typesScope">Scope</label>
+        <input id="typesScope" type="text" style="width: 260px;" />
+        <label for="typesFilter">Filter</label>
+        <input id="typesFilter" type="text" placeholder="e.g. alloc::vec" style="width: 260px;" />
+        <button id="typesClose" class="close-btn" aria-label="Close">×</button>
+      </div>
+      <div class="graph-body" style="grid-template-columns: 1fr;">
+        <div class="tree" style="height: 100%;">
+          <ul id="typesList"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
   <script>
     const scopeEl = document.getElementById('scope');
     const queryEl = document.getElementById('query');
@@ -425,6 +447,7 @@
     const thresholdEl = document.getElementById('threshold');
     const runBtn = document.getElementById('run');
     const openGraphBtn = document.getElementById('openGraph');
+    const openTypesBtn = document.getElementById('openTypes');
     const resultsEl = document.getElementById('results');
     const functionsEl = document.getElementById('functions');
     const logsModalEl = document.getElementById('logs-modal');
@@ -435,6 +458,11 @@
     const graphCrateSel = document.getElementById('graphCrate');
     const graphTreeEl = document.getElementById('graphTree');
     const graphDetailsEl = document.getElementById('graphDetails');
+    const typesModalEl = document.getElementById('types-modal');
+    const typesCloseBtn = document.getElementById('typesClose');
+    const typesScopeEl = document.getElementById('typesScope');
+    const typesFilterEl = document.getElementById('typesFilter');
+    const typesListEl = document.getElementById('typesList');
     let currentController = null;
 
     function debounce(fn, wait) {
@@ -456,6 +484,18 @@
     logsCloseBtn.addEventListener('click', closeLogsModal);
     logsModalEl.addEventListener('click', (e) => { if (e.target === logsModalEl) closeLogsModal(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLogsModal(); });
+    function openTypesModal() { typesModalEl.classList.add('show'); typesModalEl.setAttribute('aria-hidden', 'false'); }
+    function closeTypesModal() { typesModalEl.classList.remove('show'); typesModalEl.setAttribute('aria-hidden', 'true'); }
+    typesCloseBtn.addEventListener('click', closeTypesModal);
+    typesModalEl.addEventListener('click', (e) => { if (e.target === typesModalEl) closeTypesModal(); });
+    openTypesBtn.addEventListener('click', async () => {
+      openTypesModal();
+      // default to current scope selection
+      typesScopeEl.value = scopeEl.value || '';
+      await loadTypes(typesScopeEl.value || '');
+    });
+    typesScopeEl.addEventListener('keydown', async (e) => { if (e.key === 'Enter') await loadTypes(typesScopeEl.value || ''); });
+    typesFilterEl.addEventListener('input', () => filterTypesList(typesFilterEl.value));
     function openGraphModal() { graphModalEl.classList.add('show'); graphModalEl.setAttribute('aria-hidden', 'false'); }
     function closeGraphModal() { graphModalEl.classList.remove('show'); graphModalEl.setAttribute('aria-hidden', 'true'); }
     graphCloseBtn.addEventListener('click', closeGraphModal);
@@ -486,6 +526,60 @@
       } catch (e) {
         graphTreeEl.innerHTML = '<li>Failed to load graph</li>';
       }
+    }
+
+    async function loadTypes(scopeStr) {
+      try {
+        const params = new URLSearchParams();
+        if (!scopeStr) return;
+        params.set('scope', scopeStr);
+        const types = await fetch('/debug/types?' + params.toString()).then(r => r.json());
+        renderTypes(types);
+      } catch (e) {
+        typesListEl.innerHTML = '<li>Failed to load types</li>';
+      }
+    }
+    function renderTypes(entries) {
+      typesListEl.innerHTML = '';
+      const byKind = new Map();
+      for (const t of entries) {
+        if (!byKind.has(t.kind)) byKind.set(t.kind, []);
+        byKind.get(t.kind).push(t);
+      }
+      // stable order
+      const kinds = Array.from(byKind.keys()).sort();
+      for (const k of kinds) {
+        const header = document.createElement('li');
+        header.className = 'name';
+        header.textContent = k;
+        typesListEl.appendChild(header);
+        const group = document.createElement('ul');
+        for (const t of byKind.get(k)) {
+          const li = document.createElement('li');
+          const txt = document.createElement('span');
+          txt.textContent = `${(t.path || []).join('::')}`;
+          const sep = document.createTextNode(' ');
+          const a = document.createElement('a');
+          a.href = t.link;
+          a.target = '_blank';
+          a.rel = 'noreferrer noopener';
+          a.textContent = '[docs]';
+          li.appendChild(txt);
+          li.appendChild(sep);
+          li.appendChild(a);
+          group.appendChild(li);
+        }
+        typesListEl.appendChild(group);
+      }
+    }
+    function filterTypesList(q) {
+      const query = (q || '').toLowerCase();
+      const items = typesListEl.querySelectorAll('li');
+      items.forEach((li) => {
+        if (li.classList.contains('name')) return; // headers always shown
+        const txt = li.textContent || '';
+        li.style.display = txt.toLowerCase().includes(query) ? '' : 'none';
+      });
     }
 
     function buildAdj(edges) {

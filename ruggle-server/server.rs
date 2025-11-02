@@ -184,6 +184,8 @@ async fn main() {
         .route("/debug/query", get(debug_query_handler))
         .route("/debug/compare_logs", get(debug_compare_logs_handler))
         .route("/debug/doc", get(debug_doc_handler))
+        .route("/debug/parents", get(debug_parents_handler))
+        .route("/debug/types", get(debug_types_handler))
         .route("/", get(index_page))
         .nest_service("/static", static_service)
         .with_state(state)
@@ -807,6 +809,226 @@ async fn debug_doc_handler(
     Ok(Json(DocJson {
         link,
         path: path_vec,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugTypesParams {
+    scope: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TypeEntryJson {
+    name: String,
+    kind: String,
+    path: Vec<String>,
+    link: String,
+}
+
+/// Return concrete types within the given scope (structs, enums, unions, type aliases, primitives)
+async fn debug_types_handler(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Query(params): Query<DebugTypesParams>,
+) -> Result<Json<Vec<TypeEntryJson>>, (StatusCode, String)> {
+    let scope = Scope::try_from(params.scope.as_str()).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("parsing scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+    let state = state.read().await;
+    let krates = state.scopes.get(&scope).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("resolving scope `{}` failed: {}", params.scope, e),
+        )
+    })?;
+
+    let mut out = Vec::new();
+    for km in &krates {
+        let krate = state.index.crates.get(km).ok_or((
+            StatusCode::BAD_REQUEST,
+            format!("crate `{}` not found in index", km),
+        ))?;
+        let parents = state.index.parents.get(km).ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "parents missing".to_string(),
+        ))?;
+
+        for (id, item) in krate.index.iter() {
+            let kind = match &item.inner {
+                types::ItemEnum::Struct(_) => Some("struct"),
+                types::ItemEnum::Enum(_) => Some("enum"),
+                types::ItemEnum::Union(_) => Some("union"),
+                types::ItemEnum::TypeAlias(_) => Some("type_alias"),
+                types::ItemEnum::Primitive(_) => Some("primitive"),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                // Reconstruct module path for item
+                tracing::info!("reconstructing path for item {:?}", item);
+
+                if let Some(p) = ruggle_engine::reconstruct_path_for_local(krate, id, parents) {
+                    let path_vec = p.pathify();
+                    // Build docs link
+                    let crate_name = krate.name.clone().unwrap_or_default();
+                    let mut link =
+                        if crate_name == "std" || crate_name == "core" || crate_name == "alloc" {
+                            "https://doc.rust-lang.org/".to_string()
+                        } else {
+                            format!("https://docs.rs/{}/latest/", crate_name)
+                        };
+                    if path_vec.len() > 1 {
+                        for seg in &path_vec[..path_vec.len() - 1] {
+                            link.push_str(seg);
+                            link.push('/');
+                        }
+                    }
+                    let iname = item.name.clone().unwrap_or_default();
+                    let suffix = match kind {
+                        "struct" => format!("struct.{}.html", iname),
+                        "enum" => format!("enum.{}.html", iname),
+                        "union" => format!("union.{}.html", iname),
+                        "type_alias" => format!("type.{}.html", iname),
+                        "primitive" => format!("primitive.{}.html", iname),
+                        _ => format!("{}.html", iname),
+                    };
+                    link.push_str(&suffix);
+
+                    out.push(TypeEntryJson {
+                        name: iname,
+                        kind: kind.to_string(),
+                        path: path_vec,
+                        link,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(Json(out))
+}
+
+// Parents/graph explorer (restored)
+#[derive(Debug, Serialize)]
+struct GraphNodeJson {
+    id: u32,
+    name: Option<String>,
+    kind: String,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphEdgeJson {
+    from: u32,
+    to: u32,
+    relation: String,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphJson {
+    krate: CrateMetadata,
+    nodes: Vec<GraphNodeJson>,
+    edges: Vec<GraphEdgeJson>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugParentsParams {
+    #[serde(rename = "crate")]
+    krate: String,
+}
+
+async fn debug_parents_handler(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Query(params): Query<DebugParentsParams>,
+) -> Result<Json<GraphJson>, (StatusCode, String)> {
+    let state = state.read().await;
+    // Parse name[:version]
+    let (name, version_opt) = match params.krate.split_once(':') {
+        Some((n, v)) if !n.is_empty() && !v.is_empty() => (n.to_string(), Some(v.to_string())),
+        _ => (params.krate.clone(), None),
+    };
+    // Pick crate
+    let mut selected: Option<CrateMetadata> = None;
+    for meta in state.index.crates.keys() {
+        if meta.name == name {
+            if let Some(v) = &version_opt {
+                if &meta.version == v {
+                    selected = Some(meta.clone());
+                    break;
+                }
+            } else if selected.is_none() {
+                selected = Some(meta.clone());
+            }
+        }
+    }
+    let selected = selected.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("crate `{}` not found", params.krate),
+    ))?;
+
+    let krate = state.index.crates.get(&selected).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "crate missing".to_string(),
+    ))?;
+    let parents = state.index.parents.get(&selected).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "parents missing".to_string(),
+    ))?;
+
+    // Nodes
+    let mut nodes = Vec::with_capacity(krate.index.len());
+    for (id, item) in krate.index.iter() {
+        let kind = match &item.inner {
+            types::ItemEnum::Module(_) => "module",
+            types::ItemEnum::ExternCrate { .. } => "extern_crate",
+            types::ItemEnum::Use(_) => "use",
+            types::ItemEnum::Union(_) => "union",
+            types::ItemEnum::Struct(_) => "struct",
+            types::ItemEnum::StructField(_) => "struct_field",
+            types::ItemEnum::Enum(_) => "enum",
+            types::ItemEnum::Variant(_) => "variant",
+            types::ItemEnum::Function(_) => "function",
+            types::ItemEnum::Trait(_) => "trait",
+            types::ItemEnum::TraitAlias(_) => "trait_alias",
+            types::ItemEnum::Impl(_) => "impl",
+            types::ItemEnum::TypeAlias(_) => "type_alias",
+            types::ItemEnum::Constant { .. } => "constant",
+            types::ItemEnum::Static(_) => "static",
+            types::ItemEnum::ExternType => "extern_type",
+            types::ItemEnum::Macro(_) => "macro",
+            types::ItemEnum::ProcMacro(_) => "proc_macro",
+            types::ItemEnum::Primitive(_) => "primitive",
+            types::ItemEnum::AssocConst { .. } => "assoc_const",
+            types::ItemEnum::AssocType { .. } => "assoc_type",
+        }
+        .to_string();
+        nodes.push(GraphNodeJson {
+            id: id.0,
+            name: item.name.clone(),
+            kind,
+        });
+    }
+
+    // Edges (parent -> child)
+    let mut edges = Vec::with_capacity(parents.len());
+    for (child, parent) in parents.iter() {
+        let (from, relation) = match parent {
+            ruggle_engine::Parent::Module(pid) => (pid.0, "module"),
+            ruggle_engine::Parent::Struct(pid) => (pid.0, "struct"),
+            ruggle_engine::Parent::Trait(pid) => (pid.0, "trait"),
+            ruggle_engine::Parent::Impl(pid) => (pid.0, "impl"),
+        };
+        edges.push(GraphEdgeJson {
+            from,
+            to: child.0,
+            relation: relation.to_string(),
+        });
+    }
+
+    Ok(Json(GraphJson {
+        krate: selected,
+        nodes,
+        edges,
     }))
 }
 

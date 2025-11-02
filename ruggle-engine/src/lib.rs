@@ -150,7 +150,7 @@ pub fn build_parent_index(krate: &types::Crate) -> HashMap<types::Id, Parent> {
 }
 
 /// Fallback: reconstruct a lexical module path for *local* items.
-fn reconstruct_path_for_local(
+pub fn reconstruct_path_for_local(
     krate: &types::Crate,
     id: &types::Id,
     parents: &HashMap<types::Id, Parent>,
@@ -158,6 +158,12 @@ fn reconstruct_path_for_local(
     // Start from the item itself: push its own name if it has one (non-root modules/items).
     let mut cur = *id;
     let item = krate.index.get(&cur).unwrap().clone();
+
+    assert!(
+        matches!(item.inner, types::ItemEnum::Function(_) | types::ItemEnum::Trait(_) | types::ItemEnum::Impl(_) | types::ItemEnum::Struct(_) | types::ItemEnum::Enum(_) | types::ItemEnum::Union(_) | types::ItemEnum::TypeAlias(_) | types::ItemEnum::Primitive(_) ),
+        "ruggle_engine::reconstruct_path_for_local is only expected to be called with functions, traits, impls, structs, enums, unions, type aliases, or primitives, got {:?}",
+        item
+    );
 
     let mut path = Path {
         name: krate.name.clone().unwrap_or_default(),
@@ -174,6 +180,13 @@ fn reconstruct_path_for_local(
                 cur = *mid;
                 let mi = &krate.index[mid];
                 if let types::ItemEnum::Module(m) = &mi.inner {
+                    if mi.visibility != types::Visibility::Public {
+                        tracing::info!(
+                            "skipping non-public module {:?}",
+                            mi.name.as_deref().unwrap_or_default()
+                        );
+                        return None;
+                    }
                     if m.is_crate {
                         // reached the root module; prepend crate name and stop
                         path.modules.push(mi.clone());
@@ -187,12 +200,24 @@ fn reconstruct_path_for_local(
             }
             // If the immediate parent is a Trait/Impl, keep climbing—those don’t contribute
             // to the *path on disk* (HTML lives under the module tree).
-            Some(Parent::Trait(tid)) | Some(Parent::Impl(tid)) | Some(Parent::Struct(tid)) => {
+            Some(Parent::Trait(tid)) | Some(Parent::Struct(tid)) => {
                 walker = Some(*tid);
                 path.owner = Some(krate.index.get(tid).unwrap().clone());
             }
+            Some(Parent::Impl(tid)) => {
+                walker = Some(*tid);
+            }
             None => break,
         }
+    }
+
+    if path.modules.is_empty() {
+        tracing::info!(
+            "no modules tree is found for item {:?}, path: {:?}",
+            item.id,
+            path
+        );
+        return None;
     }
 
     path.modules.reverse();
