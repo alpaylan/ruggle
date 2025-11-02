@@ -271,10 +271,8 @@ impl From<Item> for Type {
 
 impl Display for Item {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(name) = &self.name {
-            write!(f, "{} ", name)?;
-        }
-        write!(f, "{}", self.inner)
+        self.inner
+            .display_item_inner_with_name(self.name.as_deref().unwrap_or_default(), f)
     }
 }
 
@@ -910,8 +908,12 @@ pub enum ItemEnum {
     },
 }
 
-impl Display for ItemEnum {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ItemEnum {
+    pub fn display_item_inner_with_name(
+        &self,
+        name: &str,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
         match self {
             ItemEnum::Module(_) => write!(f, "module"),
             ItemEnum::ExternCrate { .. } => write!(f, "extern crate"),
@@ -921,7 +923,7 @@ impl Display for ItemEnum {
             ItemEnum::StructField(_) => write!(f, "struct field"),
             ItemEnum::Enum(_) => write!(f, "enum"),
             ItemEnum::Variant(_) => write!(f, "variant"),
-            ItemEnum::Function(f_) => write!(f, "{}", f_),
+            ItemEnum::Function(f_) => f_.display_function_with_name(name, f),
             ItemEnum::Trait(_) => write!(f, "trait"),
             ItemEnum::TraitAlias(_) => write!(f, "trait alias"),
             ItemEnum::Impl(_) => write!(f, "impl"),
@@ -1148,13 +1150,13 @@ pub struct FunctionHeader {
 impl Display for FunctionHeader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_const {
-            write!(f, " const")?;
+            write!(f, "const ")?;
         }
         if self.is_unsafe {
-            write!(f, " unsafe")?;
+            write!(f, "unsafe ")?;
         }
         if self.is_async {
-            write!(f, " async")?;
+            write!(f, "async ")?;
         }
         Ok(())
     }
@@ -1237,9 +1239,13 @@ pub struct Function {
     pub has_body: bool,
 }
 
-impl Display for Function {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {} {}", self.header, self.generics, self.sig)
+impl Function {
+    pub fn display_function_with_name(
+        &self,
+        name: &str,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        write!(f, "{}fn {}{}{}", self.header, name, self.generics, self.sig)
     }
 }
 
@@ -1880,11 +1886,11 @@ impl Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}<{}>",
+            "{}{}",
             self.path,
             self.args
                 .as_ref()
-                .map(|args| args.to_string())
+                .map(|args| format!("<{}>", args.to_string()))
                 .unwrap_or_default()
         )
     }
@@ -1932,7 +1938,7 @@ pub struct FunctionSignature {
 
 impl Display for FunctionSignature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "fn(")?;
+        write!(f, "(")?;
         for (i, (name, ty)) in self.inputs.iter().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;

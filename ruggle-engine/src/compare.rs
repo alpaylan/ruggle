@@ -144,7 +144,7 @@ impl Compare<String> for Symbol {
 }
 
 impl Compare<types::ItemEnum> for QueryKind {
-    #[instrument(name = "cmp_kind", skip(self, kind, krate, generics, substs), fields(self = %self, kind = %kind))]
+    #[instrument(name = "cmp_kind", skip(krate, generics, substs))]
     fn compare(
         &self,
         kind: &types::ItemEnum,
@@ -193,7 +193,7 @@ impl Compare<Qualifier> for Qualifier {
     }
 }
 impl Compare<types::Function> for Function {
-    #[instrument(name = "cmp_fn", skip(self, function, krate, generics, substs), fields(decl = %self.decl, qualifiers = ?self.qualifiers, function = %function, generics = ?generics, substs = ?substs))]
+    #[instrument(name = "cmp_fn", skip(self, function, krate, generics, substs), fields(decl = %self.decl, qualifiers = ?self.qualifiers, function = ?function, generics = ?generics, substs = ?substs))]
     fn compare(
         &self,
         function: &types::Function,
