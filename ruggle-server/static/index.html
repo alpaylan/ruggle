@@ -823,11 +823,15 @@
     }
 
     function formatSimilarity(sim) {
-      console.log(sim);
       if (!sim) return '';
       const parts = Array.isArray(sim.parts) ? sim.parts.map(p => {
-        if (p.discrete) return p.discrete;
-        if (typeof p.continuous === 'number') return p.continuous.toFixed(2);
+        if (p.discrete) {
+          return p.reason ? `${p.discrete} (${p.reason})` : p.discrete;
+        }
+        if (typeof p.continuous === 'number') {
+          const v = p.continuous.toFixed(2);
+          return p.reason ? `${v} (${p.reason})` : v;
+        }
         return '?';
       }) : [];
       const score = (typeof sim.score === 'number') ? sim.score.toFixed(3) : '?';

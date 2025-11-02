@@ -13,22 +13,29 @@ use crate::{
     Crate,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Similarity {
-    /// Represents how digitally similar two objects are.
-    Discrete(DiscreteSimilarity),
+    /// Represents how digitally similar two objects are, with a brief reason.
+    Discrete {
+        kind: DiscreteSimilarity,
+        reason: String,
+    },
 
-    /// Represents how analogly similar two objects are.
-    Continuous(f32),
+    /// Represents how analogly similar two objects are, with a brief reason.
+    Continuous { value: f32, reason: String },
 }
 
 impl Similarity {
     pub fn score(&self) -> f32 {
         match self {
-            Discrete(Equivalent) => 0.0,
-            Discrete(Subequal) => 0.25,
-            Discrete(Different) => 1.0,
-            Continuous(s) => *s,
+            Discrete {
+                kind: Equivalent, ..
+            } => 0.0,
+            Discrete { kind: Subequal, .. } => 0.25,
+            Discrete {
+                kind: Different, ..
+            } => 1.0,
+            Continuous { value, .. } => *value,
         }
     }
 }
@@ -100,7 +107,10 @@ impl Compare<Item> for Query {
 
         match (&self.name, &item.name) {
             (Some(q), Some(i)) => sims.append(&mut q.compare(i, krate, generics, substs)),
-            (Some(_), None) => sims.push(Discrete(Different)),
+            (Some(_), None) => sims.push(Discrete {
+                kind: Different,
+                reason: "missing item name".to_string(),
+            }),
             _ => {}
         }
         trace!(?sims);
@@ -126,9 +136,10 @@ impl Compare<String> for Symbol {
         use std::cmp::max;
 
         let symbol = symbol.split("::").last().unwrap(); // SAFETY: `symbol` is not empty.
-        vec![Continuous(
-            levenshtein(self, symbol) as f32 / max(self.len(), symbol.len()) as f32,
-        )]
+        vec![Continuous {
+            value: levenshtein(self, symbol) as f32 / max(self.len(), symbol.len()) as f32,
+            reason: "symbol name distance".to_string(),
+        }]
     }
 }
 
@@ -147,7 +158,10 @@ impl Compare<types::ItemEnum> for QueryKind {
         match (self, kind) {
             (FunctionQuery(q), Function(i)) => q.compare(i, krate, generics, substs),
             // (FunctionQuery(q), Method(i)) => q.compare(i, krate, generics, substs),
-            (FunctionQuery(_), _) => vec![Discrete(Different)],
+            (FunctionQuery(_), _) => vec![Discrete {
+                kind: Different,
+                reason: "query expects function".to_string(),
+            }],
         }
     }
 }
@@ -164,9 +178,15 @@ impl Compare<Qualifier> for Qualifier {
         let mut sims = vec![];
 
         if self == qualifer {
-            sims.push(Discrete(Equivalent));
+            sims.push(Discrete {
+                kind: Equivalent,
+                reason: "qualifier matched".to_string(),
+            });
         } else {
-            sims.push(Discrete(Different));
+            sims.push(Discrete {
+                kind: Different,
+                reason: "qualifier different".to_string(),
+            });
         }
 
         sims
@@ -203,10 +223,16 @@ impl Compare<types::Function> for Function {
             .collect::<HashSet<_>>();
 
         for _ in missing_qualifiers {
-            sims.push(Discrete(Different));
+            sims.push(Discrete {
+                kind: Different,
+                reason: "missing qualifier".to_string(),
+            });
         }
         for _ in extra_qualifiers {
-            sims.push(Discrete(Different));
+            sims.push(Discrete {
+                kind: Different,
+                reason: "extra qualifier".to_string(),
+            });
         }
 
         sims.extend(self.decl.compare(&function.sig, krate, generics, substs));
@@ -234,9 +260,18 @@ impl Compare<types::FunctionSignature> for FnDecl {
 
             if inputs.len() != decl.inputs.len() {
                 let abs_diff = usize::abs_diff(inputs.len(), decl.inputs.len());
-                sims.append(&mut vec![Discrete(Different); abs_diff])
+                sims.append(&mut vec![
+                    Discrete {
+                        kind: Different,
+                        reason: "argument count differs".to_string()
+                    };
+                    abs_diff
+                ])
             } else if inputs.is_empty() && decl.inputs.is_empty() {
-                sims.push(Discrete(Equivalent));
+                sims.push(Discrete {
+                    kind: Equivalent,
+                    reason: "no arguments".to_string(),
+                });
             }
             trace!(?sims);
         }
@@ -286,8 +321,14 @@ impl Compare<Option<types::Type>> for FnRetTy {
     ) -> Vec<Similarity> {
         match (self, ret_ty) {
             (FnRetTy::Return(q), Some(i)) => q.compare(i, krate, generics, substs),
-            (FnRetTy::DefaultReturn, None) => vec![Discrete(Equivalent)],
-            _ => vec![Discrete(Different)],
+            (FnRetTy::DefaultReturn, None) => vec![Discrete {
+                kind: Equivalent,
+                reason: "unit return".to_string(),
+            }],
+            _ => vec![Discrete {
+                kind: Different,
+                reason: "return type differs".to_string(),
+            }],
         }
     }
 }
@@ -322,8 +363,10 @@ fn compare_type(
 
             match i {
                 None => {
-                    // FIXME: Previously this code assumed `i` is always found, but it apparently changed.
-                    vec![Discrete(Subequal)]
+                    vec![Discrete {
+                        kind: Subequal,
+                        reason: "unbound Self in where-predicate".to_string(),
+                    }]
                 }
                 Some(i) => q.compare(&i, krate, generics, substs),
             }
@@ -331,14 +374,23 @@ fn compare_type(
         (q, Type::Generic(i)) => match substs.get(i) {
             Some(i) => {
                 if q == i {
-                    vec![Discrete(Equivalent)]
+                    vec![Discrete {
+                        kind: Equivalent,
+                        reason: "generic matches substitution".to_string(),
+                    }]
                 } else {
-                    vec![Discrete(Different)]
+                    vec![Discrete {
+                        kind: Different,
+                        reason: "generic differs from substitution".to_string(),
+                    }]
                 }
             }
             None => {
                 substs.insert(i.clone(), q.clone());
-                vec![Discrete(Subequal)]
+                vec![Discrete {
+                    kind: Subequal,
+                    reason: "generic substituted".to_string(),
+                }]
             }
         },
         // FIXME: Check what happened to typedefs
@@ -375,17 +427,29 @@ fn compare_type(
                 .collect::<Vec<_>>();
 
             // They are both tuples.
-            sims.push(Discrete(Equivalent));
+            sims.push(Discrete {
+                kind: Equivalent,
+                reason: "tuple shape".to_string(),
+            });
 
             // FIXME: Replace this line below with `usize::abs_diff` once it got stablized.
             let abs_diff = max(q.len(), i.len()) - min(q.len(), i.len());
-            sims.append(&mut vec![Discrete(Different); abs_diff]);
+            sims.append(&mut vec![
+                Discrete {
+                    kind: Different,
+                    reason: "tuple length differs".to_string()
+                };
+                abs_diff
+            ]);
 
             sims
         }
         (Slice(q), Type::Slice(i)) => {
             // They are both slices.
-            let mut sims = vec![Discrete(Equivalent)];
+            let mut sims = vec![Discrete {
+                kind: Equivalent,
+                reason: "slice type".to_string(),
+            }];
 
             if let Some(q) = q {
                 sims.append(&mut q.compare(i.as_ref(), krate, generics, substs));
@@ -418,18 +482,27 @@ fn compare_type(
                 q.compare(i.as_ref(), krate, generics, substs)
             } else {
                 let mut sims = q.compare(i.as_ref(), krate, generics, substs);
-                sims.push(Discrete(Subequal));
+                sims.push(Discrete {
+                    kind: Subequal,
+                    reason: "mutability differs".to_string(),
+                });
                 sims
             }
         }
         (q, Type::RawPointer { type_: i, .. } | Type::BorrowedRef { type_: i, .. }) => {
             let mut sims = q.compare(i.as_ref(), krate, generics, substs);
-            sims.push(Discrete(Subequal));
+            sims.push(Discrete {
+                kind: Subequal,
+                reason: "pointer/reference wrapper".to_string(),
+            });
             sims
         }
         (RawPointer { type_: q, .. } | BorrowedRef { type_: q, .. }, i) => {
             let mut sims = q.compare(i, krate, generics, substs);
-            sims.push(Discrete(Subequal));
+            sims.push(Discrete {
+                kind: Subequal,
+                reason: "pointer/reference wrapper".to_string(),
+            });
             sims
         }
         (
@@ -465,7 +538,10 @@ fn compare_type(
                             (Some(q), Some(i)) => {
                                 sims.append(&mut q.compare(i, krate, generics, substs))
                             }
-                            (Some(_), None) => sims.push(Discrete(Different)),
+                            (Some(_), None) => sims.push(Discrete {
+                                kind: Different,
+                                reason: "missing generic arg".to_string(),
+                            }),
                             (None, _) => {}
                         });
                     }
@@ -474,7 +550,13 @@ fn compare_type(
                 },
                 (Some(q), None) => {
                     let GenericArgs::AngleBracketed { args: ref q } = **q;
-                    sims.append(&mut vec![Discrete(Different); q.len()])
+                    sims.append(&mut vec![
+                        Discrete {
+                            kind: Different,
+                            reason: "missing generic args".to_string()
+                        };
+                        q.len()
+                    ])
                 }
                 (None, _) => {}
             }
@@ -482,7 +564,10 @@ fn compare_type(
             sims
         }
         (Primitive(q), Type::Primitive(i)) => q.compare(i, krate, generics, substs),
-        _ => vec![Discrete(Different)],
+        _ => vec![Discrete {
+            kind: Different,
+            reason: "type mismatch".to_string(),
+        }],
     }
 }
 
@@ -523,9 +608,15 @@ impl Compare<String> for PrimitiveType {
         _: &mut HashMap<String, Type>,
     ) -> Vec<Similarity> {
         if self.as_str() == prim_ty {
-            vec![Discrete(Equivalent)]
+            vec![Discrete {
+                kind: Equivalent,
+                reason: "primitive matches".to_string(),
+            }]
         } else {
-            vec![Discrete(Different)]
+            vec![Discrete {
+                kind: Different,
+                reason: "primitive differs".to_string(),
+            }]
         }
     }
 }

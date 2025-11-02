@@ -32,11 +32,11 @@ use tower_http::{
     trace::TraceLayer,
 };
 
-use ruggle_engine::compare::{Similarities, Similarity};
+use ruggle_engine::compare::Similarity;
 use ruggle_engine::query::parse::parse_query;
+use ruggle_engine::Index;
 use ruggle_engine::Path as DocPath;
 use ruggle_engine::{build_parent_index, types};
-use ruggle_engine::{query, Index};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::{self as ts, Layer as _};
 
@@ -276,7 +276,6 @@ fn init_logger() {
 struct LogFileWriter(Arc<Mutex<File>>);
 impl std::io::Write for LogFileWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        use std::io::Write as _;
         let mut g = self.0.lock().unwrap();
         g.write_all(buf)?;
         Ok(buf.len())
@@ -628,6 +627,7 @@ struct DebugSimilarityParams {
 struct PartJson {
     discrete: Option<&'static str>,
     continuous: Option<f32>,
+    reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -654,7 +654,6 @@ async fn debug_similarity_handler(
             format!("parsing query `{}` failed", params.query),
         ))?;
 
-    use std::collections::HashMap as StdHashMap;
     let state = state.read().await;
     let krates = state.scopes.get(&scope).map_err(|e| {
         (
@@ -688,8 +687,8 @@ async fn debug_similarity_handler(
         .0
         .into_iter()
         .map(|s| match s {
-            Similarity::Discrete(d) => {
-                let label: &'static str = match d {
+            Similarity::Discrete { kind, reason } => {
+                let label: &'static str = match kind {
                     ruggle_engine::compare::DiscreteSimilarity::Equivalent => "equivalent",
                     ruggle_engine::compare::DiscreteSimilarity::Subequal => "subequal",
                     ruggle_engine::compare::DiscreteSimilarity::Different => "different",
@@ -697,11 +696,13 @@ async fn debug_similarity_handler(
                 PartJson {
                     discrete: Some(label),
                     continuous: None,
+                    reason: Some(reason),
                 }
             }
-            Similarity::Continuous(v) => PartJson {
+            Similarity::Continuous { value, reason } => PartJson {
                 discrete: None,
-                continuous: Some(v),
+                continuous: Some(value),
+                reason: Some(reason),
             },
         })
         .collect::<Vec<_>>();
@@ -912,8 +913,8 @@ async fn debug_compare_logs_handler(
             .0
             .into_iter()
             .map(|s| match s {
-                Similarity::Discrete(d) => {
-                    let label: &'static str = match d {
+                Similarity::Discrete { kind, reason } => {
+                    let label: &'static str = match kind {
                         ruggle_engine::compare::DiscreteSimilarity::Equivalent => "equivalent",
                         ruggle_engine::compare::DiscreteSimilarity::Subequal => "subequal",
                         ruggle_engine::compare::DiscreteSimilarity::Different => "different",
@@ -921,11 +922,13 @@ async fn debug_compare_logs_handler(
                     PartJson {
                         discrete: Some(label),
                         continuous: None,
+                        reason: Some(reason),
                     }
                 }
-                Similarity::Continuous(v) => PartJson {
+                Similarity::Continuous { value, reason } => PartJson {
                     discrete: None,
-                    continuous: Some(v),
+                    continuous: Some(value),
+                    reason: Some(reason),
                 },
             })
             .collect::<Vec<_>>();
