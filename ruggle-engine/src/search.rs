@@ -386,7 +386,10 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::compare::{DiscreteSimilarity::*, Similarity::*};
+    use crate::compare::{
+        DiscreteSimilarity::{self},
+        Similarity::*,
+    };
     use crate::query::{FnDecl, FnRetTy, Function};
     use crate::types::{FunctionHeader, Target};
 
@@ -451,7 +454,10 @@ mod tests {
 
         assert_eq!(
             query.compare(&item, &krate, &mut generics, &mut substs),
-            vec![Continuous(0.0)]
+            vec![Continuous {
+                value: 0.0,
+                reason: "symbol name distance".to_string()
+            }]
         )
     }
 
@@ -473,7 +479,16 @@ mod tests {
 
         assert_eq!(
             q.compare(&i, &krate, &mut generics, &mut substs),
-            vec![Discrete(Equivalent), Discrete(Equivalent)]
+            vec![
+                Discrete {
+                    kind: DiscreteSimilarity::Equivalent,
+                    reason: "no arguments".to_string()
+                },
+                Discrete {
+                    kind: DiscreteSimilarity::Equivalent,
+                    reason: "unit return".to_string()
+                }
+            ]
         )
     }
 }

@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug, Display};
+use std::iter::once;
 use std::path::PathBuf;
 
 use serde::{de, Deserialize, Deserializer, Serialize};
 
 use crate::query::Qualifier;
-
+use crate::reconstruct_path_for_local;
+use ruggle_util::pathtree::PathTree;
 /// The root of the emitted JSON blob.
 ///
 /// It contains all type/documentation information
@@ -36,6 +38,84 @@ pub struct Crate {
     /// A single version number to be used in the future when making backwards incompatible changes
     /// to the JSON output.
     pub format_version: u32,
+}
+
+#[derive(Debug, Default)]
+struct CrateDependencyTree {
+    children: HashMap<Id, CrateDependencyTree>,
+}
+
+impl PathTree for CrateDependencyTree {
+    type Key = Id;
+    type Children = HashMap<Id, CrateDependencyTree>;
+
+    fn children_mut(&mut self) -> &mut Self::Children {
+        &mut self.children
+    }
+}
+
+impl CrateDependencyTree {
+    pub fn new(krate: &Crate) -> Self {
+        let parents = crate::build_parent_index(krate);
+        let mut children = CrateDependencyTree::default();
+        // Add all children with no parents.
+        for (id, item) in &krate.index {
+            match item.inner {
+                ItemEnum::Function(_)
+                | ItemEnum::Trait(_)
+                | ItemEnum::Impl(_)
+                | ItemEnum::Struct(_)
+                | ItemEnum::Enum(_)
+                | ItemEnum::Union(_)
+                | ItemEnum::TypeAlias(_)
+                | ItemEnum::Primitive(_) => {
+                    let path = reconstruct_path_for_local(krate, id, &parents).expect(&format!(
+                        "Item({})[{}] does not have a valid path",
+                        id.0, item
+                    ));
+                    let path_iter = path
+                        .modules
+                        .iter()
+                        .map(|m| m.id.clone())
+                        .chain(path.owner.iter().map(|p| p.id.clone()))
+                        .chain(once(path.item.id.clone()));
+
+                    PathTree::insert_path(&mut children, path_iter);
+                }
+                _ => {}
+            }
+        }
+        println!("CrateDependencyTree: {:#?}", children);
+        children
+    }
+}
+
+impl Display for CrateDependencyTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn fmt_tree(
+            tree: &CrateDependencyTree,
+            f: &mut std::fmt::Formatter<'_>,
+            indent: usize,
+        ) -> std::fmt::Result {
+            for (key, child) in &tree.children {
+                for _ in 0..indent {
+                    write!(f, "  ")?;
+                }
+                writeln!(f, "- {}", key.0)?;
+                fmt_tree(child, f, indent + 1)?;
+            }
+            Ok(())
+        }
+        fmt_tree(self, f, 0)
+    }
+}
+
+impl Display for Crate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // build the dependency tree for the crate.
+        let dep_tree = CrateDependencyTree::new(self);
+        write!(f, "{}", dep_tree)
+    }
 }
 
 fn crate_version_as_string<S>(version: &String, serializer: S) -> Result<S::Ok, S::Error>
@@ -915,27 +995,27 @@ impl ItemEnum {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
-            ItemEnum::Module(_) => write!(f, "module"),
-            ItemEnum::ExternCrate { .. } => write!(f, "extern crate"),
-            ItemEnum::Use(_) => write!(f, "use"),
-            ItemEnum::Union(_) => write!(f, "union"),
-            ItemEnum::Struct(_) => write!(f, "struct"),
-            ItemEnum::StructField(_) => write!(f, "struct field"),
-            ItemEnum::Enum(_) => write!(f, "enum"),
-            ItemEnum::Variant(_) => write!(f, "variant"),
+            ItemEnum::Module(_) => write!(f, "mod {}", name),
+            ItemEnum::ExternCrate { .. } => write!(f, "extern crate {}", name),
+            ItemEnum::Use(_) => write!(f, "use {}", name),
+            ItemEnum::Union(_) => write!(f, "union {}", name),
+            ItemEnum::Struct(_) => write!(f, "struct {}", name),
+            ItemEnum::StructField(_) => write!(f, "struct field {}", name),
+            ItemEnum::Enum(_) => write!(f, "enum {}", name),
+            ItemEnum::Variant(_) => write!(f, "variant {}", name),
             ItemEnum::Function(f_) => f_.display_function_with_name(name, f),
-            ItemEnum::Trait(_) => write!(f, "trait"),
-            ItemEnum::TraitAlias(_) => write!(f, "trait alias"),
-            ItemEnum::Impl(_) => write!(f, "impl"),
-            ItemEnum::TypeAlias(_) => write!(f, "type alias"),
-            ItemEnum::Constant { .. } => write!(f, "constant"),
-            ItemEnum::Static(_) => write!(f, "static"),
-            ItemEnum::ExternType => write!(f, "extern type"),
-            ItemEnum::Macro(_) => write!(f, "macro"),
-            ItemEnum::ProcMacro(_) => write!(f, "procedural macro"),
-            ItemEnum::Primitive(_) => write!(f, "primitive type"),
-            ItemEnum::AssocConst { .. } => write!(f, "associated constant"),
-            ItemEnum::AssocType { .. } => write!(f, "associated type"),
+            ItemEnum::Trait(_) => write!(f, "trait {}", name),
+            ItemEnum::TraitAlias(_) => write!(f, "trait alias {}", name),
+            ItemEnum::Impl(_) => write!(f, "impl {}", name),
+            ItemEnum::TypeAlias(_) => write!(f, "type alias {}", name),
+            ItemEnum::Constant { .. } => write!(f, "constant {}", name),
+            ItemEnum::Static(_) => write!(f, "static {}", name),
+            ItemEnum::ExternType => write!(f, "extern type {}", name),
+            ItemEnum::Macro(_) => write!(f, "macro {}", name),
+            ItemEnum::ProcMacro(_) => write!(f, "procedural macro {}", name),
+            ItemEnum::Primitive(_) => write!(f, "primitive type {}", name),
+            ItemEnum::AssocConst { .. } => write!(f, "associated constant {}", name),
+            ItemEnum::AssocType { .. } => write!(f, "associated type {}", name),
         }
     }
 }

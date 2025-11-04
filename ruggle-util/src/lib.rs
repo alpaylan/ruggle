@@ -1,3 +1,5 @@
+pub mod pathtree;
+
 use std::collections::HashMap;
 
 use rustdoc_types::{Crate, Id, Item, ItemSummary};

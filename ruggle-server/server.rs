@@ -795,7 +795,8 @@ async fn debug_doc_handler(
             }
             Some(ruggle_engine::Parent::Trait(tid))
             | Some(ruggle_engine::Parent::Impl(tid))
-            | Some(ruggle_engine::Parent::Struct(tid)) => {
+            | Some(ruggle_engine::Parent::Struct(tid))
+            | Some(ruggle_engine::Parent::Enum(tid)) => {
                 path.owner = Some(krate.index.get(tid).unwrap().clone());
                 walker = Some(*tid);
             }
@@ -1017,6 +1018,7 @@ async fn debug_parents_handler(
             ruggle_engine::Parent::Struct(pid) => (pid.0, "struct"),
             ruggle_engine::Parent::Trait(pid) => (pid.0, "trait"),
             ruggle_engine::Parent::Impl(pid) => (pid.0, "impl"),
+            ruggle_engine::Parent::Enum(pid) => (pid.0, "enum"),
         };
         edges.push(GraphEdgeJson {
             from,

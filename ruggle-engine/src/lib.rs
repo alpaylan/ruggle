@@ -22,6 +22,7 @@ pub enum Parent {
     Struct(types::Id),
     Trait(types::Id),
     Impl(types::Id),
+    Enum(types::Id),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,8 +129,16 @@ pub fn build_parent_index(krate: &types::Crate) -> HashMap<types::Id, Parent> {
                     parent.insert(*child, Parent::Struct(*id));
                 }
             }
+            types::ItemEnum::Enum(e) => {
+                for child in &e.impls {
+                    parent.insert(*child, Parent::Enum(*id));
+                }
+            }
             types::ItemEnum::Trait(t) => {
                 for child in &t.items {
+                    parent.insert(*child, Parent::Trait(*id));
+                }
+                for child in &t.implementations {
                     parent.insert(*child, Parent::Trait(*id));
                 }
             }
@@ -174,9 +183,11 @@ pub fn reconstruct_path_for_local(
 
     // Walk up through modules until crate root.
     let mut walker = Some(cur);
+    tracing::trace!("reconstructing path for item {:?}", item.id);
     while let Some(here) = walker {
         match parents.get(&here) {
             Some(Parent::Module(mid)) => {
+                tracing::trace!("climbing up from {:?} to module {:?}", here, mid);
                 cur = *mid;
                 let mi = &krate.index[mid];
                 if let types::ItemEnum::Module(m) = &mi.inner {
@@ -194,17 +205,20 @@ pub fn reconstruct_path_for_local(
                     }
                 }
                 if let Some(_mname) = mi.name.as_deref() {
+                    tracing::trace!("found module {:?} in path", _mname);
                     path.modules.push(mi.clone());
                 }
                 walker = Some(cur);
             }
             // If the immediate parent is a Trait/Impl, keep climbing—those don’t contribute
             // to the *path on disk* (HTML lives under the module tree).
-            Some(Parent::Trait(tid)) | Some(Parent::Struct(tid)) => {
+            Some(Parent::Trait(tid)) | Some(Parent::Struct(tid)) | Some(Parent::Enum(tid)) => {
+                tracing::trace!("climbing up from {:?} to trait/struct/enum {:?}", here, tid);
                 walker = Some(*tid);
                 path.owner = Some(krate.index.get(tid).unwrap().clone());
             }
             Some(Parent::Impl(tid)) => {
+                tracing::trace!("climbing up from {:?} to impl {:?}", here, tid);
                 walker = Some(*tid);
             }
             None => break,
